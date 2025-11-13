@@ -1,0 +1,132 @@
+# Makefile for integrated top module cocotb test
+
+# Default target when running 'make' without arguments
+.DEFAULT_GOAL := all
+
+# Defaults
+SIM ?= verilator
+TOPLEVEL_LANG ?= verilog
+
+# Simulation build directory
+SIM_BUILD ?= sim_build
+
+# Project paths
+# Compute project root relative to this Makefile's location so make works
+# even when invoked from a different current working directory.
+PROJECT_ROOT := $(abspath ..)
+RTL_DIR = $(PROJECT_ROOT)/rtl/core
+DEPS_DIR = $(PROJECT_ROOT)/deps
+export PYTHONPATH := $(PROJECT_ROOT)/common:$(PYTHONPATH)
+
+# Source files - complete top module with all dependencies
+# Note: JTAG DTM tests are in ../top_jtag directory
+VERILOG_SOURCES = \
+	$(RTL_DIR)/*.sv \
+	$(RTL_DIR)/*.vh \
+	$(RTL_DIR)/*.svh \
+	$(DEPS_DIR)/apb/src/apb_pkg.sv \
+	$(DEPS_DIR)/apb/src/apb_intf.sv 
+
+
+# Include paths
+VERILOG_INCLUDE_DIRS = \
+	$(RTL_DIR) \
+	$(RTL_DIR)/core \
+	$(DEPS_DIR)/apb/src \
+	$(DEPS_DIR)/apb/include
+
+# Top level module
+TOPLEVEL = top_with_ram_sim
+
+# Test parameters
+NUM_HARTS ?= 2
+ADDR_WIDTH ?= 32
+DATA_WIDTH ?= 32
+CONFSTRPTR ?= "128'hCAFEBABE_DEADBEEF_12345678_9ABCDEF0"
+HARTINFO ?= "32'h00000000"
+ROM_NUM_REGS ?= 512
+ROM_INIT_FILE ?= "rom.hex"
+
+# Configuration parameters
+PLUSARGS += +NUM_HARTS=$(NUM_HARTS)
+PLUSARGS += +ADDR_WIDTH=$(ADDR_WIDTH)
+PLUSARGS += +DATA_WIDTH=$(DATA_WIDTH)
+EXTRA_ARGS += --trace --trace-structs
+
+# Verilator-specific settings
+ifeq ($(SIM),verilator)
+
+	COMPILE_ARGS += -Wno-WIDTHTRUNC
+	COMPILE_ARGS += -Wno-WIDTHEXPAND
+	COMPILE_ARGS += -Wno-CASEINCOMPLETE
+	COMPILE_ARGS += -Wno-CASEX
+	COMPILE_ARGS += -Wno-TIMESCALEMOD
+	COMPILE_ARGS += -Wno-PINMISSING
+	COMPILE_ARGS += -Wno-MULTIDRIVEN
+	COMPILE_ARGS += -Wno-UNOPTFLAT
+	COMPILE_ARGS += -Wno-MODDUP
+	COMPILE_ARGS += -Wno-IMPLICITSTATIC
+	COMPILE_ARGS += -Wno-IMPLICIT
+	COMPILE_ARGS += -Wno-ALWCOMBORDER
+	COMPILE_ARGS += -Wno-LATCH
+	COMPILE_ARGS += --trace --trace-structs
+	COMPILE_ARGS += --trace-max-array 1024
+	COMPILE_ARGS += --x-assign unique
+	COMPILE_ARGS += --x-initial unique
+	COMPILE_ARGS += -CFLAGS "-std=c++14"
+	COMPILE_ARGS += --timescale 1ns/1ps
+	COMPILE_ARGS += -Wno-DECLFILENAME
+	
+
+endif
+
+# Python test module (can be overridden by command line: make MODULE=test_halt_resume)
+MODULE ?= test_top
+
+# Cocotb configuration
+export COCOTB_REDUCED_LOG_FMT=1
+export COCOTB_LOG_LEVEL=INFO
+export PYTHONPATH := $(PROJECT_ROOT)/tb_coco/common:$(PYTHONPATH)
+
+# Include cocotb makefiles
+include $(shell cocotb-config --makefiles)/Makefile.sim
+
+# Custom targets
+.PHONY: all clean view test
+
+# Default target runs the simulation (via cocotb's Makefile.sim)
+all: sim
+
+test: sim
+	@echo "✓ Integrated top module tests complete"
+
+clean::
+	@echo "Cleaning build artifacts..."
+	rm -rf $(SIM_BUILD)
+	rm -f results.xml
+	rm -f dump.vcd
+	rm -rf __pycache__
+
+view:
+	@echo "Opening waveform viewer..."
+	gtkwave dump.vcd &
+
+# Help target
+help:
+	@echo "Makefile for integrated top module cocotb tests"
+	@echo ""
+	@echo "Targets:"
+	@echo "  all (default) - Run all tests"
+	@echo "  test          - Run tests"
+	@echo "  clean         - Clean build artifacts"
+	@echo "  view          - View waveforms with GTKWave"
+	@echo "  help          - Show this help message"
+	@echo ""
+	@echo "Parameters:"
+	@echo "  NUM_HARTS     - Number of harts (default: 2)"
+	@echo "  ADDR_WIDTH    - Address width (default: 32)"
+	@echo "  DATA_WIDTH    - Data width (default: 32)"
+	@echo "  SIM           - Simulator (default: verilator)"
+	@echo ""
+	@echo "Example:"
+	@echo "  make test NUM_HARTS=2"

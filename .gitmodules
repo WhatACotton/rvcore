@@ -1,0 +1,9 @@
+[submodule "apb"]
+	path = apb
+	url = https://github.com/pulp-platform/apb.git
+[submodule "deps/apb"]
+	path = deps/apb
+	url = https://github.com/pulp-platform/apb.git
+[submodule "deps/riscv-tests"]
+	path = deps/riscv-tests
+	url = https://github.com/riscv-software-src/riscv-tests.git

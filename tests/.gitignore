@@ -1,0 +1,6 @@
+*.o 
+*.elf 
+*.bin 
+*.hex 
+*.dis
+!riscv_test_hex/*.hex

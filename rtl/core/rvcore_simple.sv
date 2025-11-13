@@ -1,0 +1,1389 @@
+`include "instructions_defines.svh"
+`include "control_defines.svh"
+`include "dm_reg_addr.vh"
+
+module core #(
+    parameter int START_ADDR = 32'h0000_0000,
+    parameter int HART_ID    = 0               // Hart ID for mhartid CSR (0xF14)
+  ) (
+    input  logic        clk,
+    input  logic        reset_n,
+    input  logic        dmem_wready,
+    output logic [ 1:0] dmem_wvalid,
+    input  logic        dmem_rvalid,
+    output logic        dmem_rready,
+    output logic [31:0] dmem_wdata,
+    input        [31:0] dmem_rdata,
+    output logic [31:0] dmem_addr,
+    output logic        imem_rready,
+    input  logic        imem_rvalid,
+    input        [31:0] imem_rdata,
+    output logic [31:0] imem_addr,
+    output logic        exit,
+    // Interrupt inputs
+    input  logic        m_external_interrupt,
+    input  logic        m_timer_interrupt,
+    input  logic        m_software_interrupt,
+    // Debug Module interface
+    input  logic        i_haltreq,             // Debug halt request from DM
+    output logic        debug_mode_o,          // Debug mode status output
+    output logic        trigger_fire_o         // Trigger fired (for external monitoring)
+  );
+  enum logic [2:0] {
+         PROC,
+         IMEM_READ,
+         IMEM_DONE,
+         DMEM_READ,
+         DMEM_WRITE,
+         DMEM_DONE
+       }
+       proc_state, next_proc_state;
+
+  always_ff @(posedge clk or negedge reset_n)
+  begin
+    if (!reset_n)
+    begin
+      proc_state <= PROC;
+    end
+    else
+    begin
+      proc_state <= next_proc_state;
+
+      // Save instruction and address for any memory operation
+      // (both loads and stores, including SB/SH that need RMW)
+      if (proc_state == IMEM_DONE && (wb_sel == `WB_MEM || mem_wen != `MEN_X))
+      begin
+        mem_inst <= inst;
+        mem_addr_saved <= alu_out;
+      end
+    end
+  end
+
+  always_comb
+  begin
+    next_proc_state = proc_state;
+
+    // If exit flag is set, halt the core by staying in current state
+    if (exit_flag)
+    begin
+      next_proc_state = proc_state;  // Halt - no state transitions
+    end
+    else
+    begin
+      case (proc_state)
+        PROC:
+        begin
+          next_proc_state = IMEM_READ;
+        end
+        IMEM_READ:
+        begin
+          if (imem_rvalid && imem_rready)
+          begin
+            next_proc_state = IMEM_DONE;
+          end
+        end
+        IMEM_DONE:
+        begin
+          if (mem_wen != `MEN_X)
+          begin
+            // For SB/SH, need Read-Modify-Write: Read first
+            if (`IS_SB(inst) || `IS_SH(inst))
+            begin
+              next_proc_state = DMEM_READ;
+            end
+            else
+            begin
+              // SW: Direct write
+              next_proc_state = DMEM_WRITE;
+            end
+          end
+          else if (mem_wen == `MEN_X && wb_sel == `WB_MEM)
+          begin
+            next_proc_state = DMEM_READ;
+          end
+          else
+          begin
+            next_proc_state = PROC;
+          end
+        end
+        DMEM_WRITE:
+        begin
+          if (dmem_wvalid && dmem_wready)
+          begin
+            if (wb_sel == `WB_MEM)
+            begin
+              next_proc_state = DMEM_READ;
+            end
+            else
+            begin
+              next_proc_state = PROC;
+            end
+          end
+        end
+        DMEM_READ:
+        begin
+          if (dmem_rvalid && dmem_rready)
+          begin
+            // After RMW read for SB/SH, go to write
+            if (mem_wen != `MEN_X && (`IS_SB(mem_inst) || `IS_SH(mem_inst)))
+            begin
+              next_proc_state = DMEM_WRITE;
+            end
+            else
+            begin
+              next_proc_state = DMEM_DONE;
+            end
+          end
+        end
+        // Duplicate DMEM_READ case removed (handled above)
+        DMEM_DONE:
+        begin
+          next_proc_state = PROC;
+        end
+        default:
+        begin
+          next_proc_state = PROC;
+        end
+      endcase
+    end
+  end
+  assign imem_rready = (proc_state == IMEM_READ);
+
+  // Signal to indicate instruction retirement for PC stalling
+  logic instruction_retired;
+
+  // Exit flag to halt the core when test completes
+  logic exit_flag;
+
+  always_comb
+  begin
+    instruction_retired = 1'b0;
+
+    case (proc_state)
+      IMEM_DONE:
+      begin
+        // ALU, CSR, or Branch instructions complete here
+        if (mem_wen == `MEN_X && wb_sel != `WB_MEM)
+        begin
+          instruction_retired = 1'b1;
+        end
+      end
+      DMEM_WRITE:
+      begin
+        // Store instruction completes when memory handshake is done
+        if (dmem_wvalid && dmem_wready && wb_sel != `WB_MEM)
+        begin
+          instruction_retired = 1'b1;
+        end
+      end
+      DMEM_DONE:
+      begin
+        // Load instruction completes here
+        instruction_retired = 1'b1;
+      end
+      default:
+        instruction_retired = 1'b0;
+    endcase
+  end
+
+  // Register file and CSR
+  logic [  31:0][31:0] register_file;
+  logic [4095:0][31:0] csr_file;
+
+  // M-Mode CSR registers
+  logic [  31:0]       mtvec;
+  // Machine trap-handler base address
+  logic [  31:0]       mcause;
+  // Machine trap cause
+  logic [  31:0]       mepc;
+  // Machine exception program counter
+  logic [  31:0]       mstatus;
+  // Machine status register
+
+  // mstatus bit fields
+  logic                mstatus_mie;
+  // bit 3: Machine Interrupt Enable
+  logic                mstatus_mpie;
+  // bit 7: Previous MIE (before trap)
+  logic [   1:0]       mstatus_mpp;
+  // bits 12:11: Previous privilege mode
+
+  // Construct mstatus register from bit fields
+  assign mstatus = {19'd0, mstatus_mpp, 3'd0, mstatus_mpie, 3'd0, mstatus_mie, 3'd0};
+
+  // Debug CSR registers
+  logic [31:0] dcsr;  // Debug Control and Status Register
+  logic [31:0] dpc;
+  // Debug Program Counter
+  logic        debug_mode;
+  // CPU is in debug mode
+
+  // dcsr bit fields (simplified - key fields only)
+  logic [ 2:0] dcsr_cause;
+  // bits 8:6 - debug entry cause
+  logic        dcsr_step;
+  // bit 2 - single step mode
+  logic [ 1:0] dcsr_prv;
+  // bits 1:0 - privilege level before debug
+
+  // Construct dcsr register
+  // [31:28]=xdebugver(4), [27:16]=0, [15]=ebreakm, [14:12]=0,
+  // [11]=stepie, [10]=stopcount, [9]=stoptime, [8:6]=cause,
+  // [5:4]=0, [3]=mprven, [2]=step, [1:0]=prv
+  assign dcsr = {
+           4'h4, 12'h0, 1'b0, 3'h0, 1'b0, 1'b0, 1'b0, dcsr_cause, 2'h0, 1'b0, dcsr_step, dcsr_prv
+         };
+
+  // Output debug mode status
+  assign debug_mode_o = debug_mode;
+
+  // ============================================================================
+  // Trigger Module (Sdtrig - Simplified for M-Mode)
+  // ============================================================================
+  parameter int NUM_TRIGGERS = 4;  // 4 hardware triggers
+
+  // Trigger CSR registers
+  logic [             1:0]       tselect;  // 2 bits for 4 triggers
+  logic [NUM_TRIGGERS-1:0][31:0] tdata1;
+  logic [NUM_TRIGGERS-1:0][31:0] tdata2;
+
+  // Trigger match signals
+  logic [NUM_TRIGGERS-1:0]       trigger_exec_match;
+  logic [NUM_TRIGGERS-1:0]       trigger_load_match;
+  logic [NUM_TRIGGERS-1:0]       trigger_store_match;
+  logic                          trigger_fire;
+
+  // Extract fields from tdata1 (mcontrol format)
+  // [31:28] type (2=mcontrol)
+  // [2] execute
+  // [1] store
+  // [0] load
+
+  // Memory access tracking for triggers
+  logic                          mem_load_req;  // Load request in current cycle
+  logic                          mem_store_req;  // Store request in current cycle
+  logic [            31:0]       mem_access_addr;  // Memory access address
+
+  // PC-based trigger (execute match)
+  always_comb
+  begin
+    for (int i = 0; i < NUM_TRIGGERS; i++)
+    begin
+      trigger_exec_match[i] = (tdata1[i][31:28] == 4'd2) &&  // type = mcontrol
+                        tdata1[i][2] &&  // execute bit
+                        (pc == tdata2[i]) &&  // PC match
+                        !debug_mode;  // Only in normal mode
+    end
+  end
+
+  // Load trigger (memory read watchpoint)
+  always_comb
+  begin
+    for (int i = 0; i < NUM_TRIGGERS; i++)
+    begin
+      trigger_load_match[i] = (tdata1[i][31:28] == 4'd2) &&  // type = mcontrol
+                        tdata1[i][0] &&  // load bit
+                        mem_load_req &&  // Load operation
+                        (mem_access_addr == tdata2[i]) &&  // Address match
+                        !debug_mode;  // Only in normal mode
+    end
+  end
+
+  // Store trigger (memory write watchpoint)
+  always_comb
+  begin
+    for (int i = 0; i < NUM_TRIGGERS; i++)
+    begin
+      trigger_store_match[i] = (tdata1[i][31:28] == 4'd2) &&  // type = mcontrol
+                         tdata1[i][1] &&  // store bit
+                         mem_store_req &&  // Store operation
+                         (mem_access_addr == tdata2[i]) &&  // Address match
+                         !debug_mode;  // Only in normal mode
+    end
+  end
+
+  // Combine all trigger types
+  assign trigger_fire   = |trigger_exec_match | |trigger_load_match | |trigger_store_match;
+  assign trigger_fire_o = trigger_fire;
+
+  // ============================================================================
+
+  // PC register
+  logic [31:0] pc;
+  // Current instruction
+  logic [31:0] inst;
+  // Saved instruction and address for memory operations (used in writeback)
+  logic [31:0] mem_inst;
+  logic [31:0] mem_addr_saved;
+  // Read-Modify-Write buffer for SB/SH operations
+  logic [31:0] rmw_read_data;
+
+  // Instruction fields
+  logic [4:0] rs1_addr, rs2_addr, rd_addr;
+  logic [31:0] rs1_data, rs2_data;
+  logic [31:0] imm_i, imm_s, imm_b, imm_j, imm_u, imm_z;
+
+  // Control signals
+  logic [`EXE_FUN_LEN-1:0] exe_fun;
+  logic [    `OP1_LEN-1:0] op1_sel;
+  logic [    `OP2_LEN-1:0] op2_sel;
+  logic [    `MEN_LEN-1:0] mem_wen;
+  logic [    `REN_LEN-1:0] rf_wen;
+  logic [ `WB_SEL_LEN-1:0] wb_sel;
+  logic [    `CSR_LEN-1:0] csr_cmd;
+
+  // ALU operands and result
+  logic [31:0] op1_data, op2_data;
+  logic [31:0] alu_out;
+  logic        br_flg;
+
+  // CSR signals
+  logic [11:0] csr_addr;
+  logic [31:0] csr_rdata, csr_wdata;
+
+  // Writeback data
+  logic [31:0] wb_data;
+
+  // PC assignment
+  assign imem_addr = pc;
+
+  always_ff @(posedge clk or negedge reset_n)
+  begin
+    if (!reset_n)
+    begin
+      inst <= 32'd0;
+    end
+    else
+    begin
+      if (proc_state == IMEM_READ && imem_rready && imem_rvalid)
+      begin
+        inst <= imem_rdata;
+      end
+    end
+  end
+
+  // Instruction decode
+  assign rs1_addr = inst[19:15];
+  assign rs2_addr = inst[24:20];
+  assign rd_addr  = inst[11:7];
+
+  // Register read
+  assign rs1_data = (rs1_addr != 5'd0) ? register_file[rs1_addr] : 32'd0;
+  assign rs2_data = (rs2_addr != 5'd0) ? register_file[rs2_addr] : 32'd0;
+
+  // Immediate generation
+  assign imm_i    = {{20{inst[31]}}, inst[31:20]};
+  assign imm_s    = {{20{inst[31]}}, inst[31:25], inst[11:7]};
+  assign imm_b    = {{19{inst[31]}}, inst[31], inst[7], inst[30:25], inst[11:8], 1'b0};
+  assign imm_j    = {{11{inst[31]}}, inst[31], inst[19:12], inst[20], inst[30:21], 1'b0};
+  assign imm_u    = {inst[31:12], 12'd0};
+  assign imm_z    = {27'd0, inst[19:15]};
+
+  // Instruction decoder
+  always_comb
+  begin
+    exe_fun = `ALU_X;
+    op1_sel = `OP1_RS1;
+    op2_sel = `OP2_RS2;
+    mem_wen = `MEN_X;
+    rf_wen  = `REN_X;
+    wb_sel  = `WB_X;
+    csr_cmd = `CSR_X;
+    if (`IS_LW(inst))
+    begin
+      exe_fun = `ALU_ADD;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_IMI;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_MEM;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_LH(inst))
+    begin
+      exe_fun = `ALU_ADD;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_IMI;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_MEM;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_LHU(inst))
+    begin
+      exe_fun = `ALU_ADD;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_IMI;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_MEM;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_LB(inst))
+    begin
+      exe_fun = `ALU_ADD;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_IMI;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_MEM;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_LBU(inst))
+    begin
+      exe_fun = `ALU_ADD;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_IMI;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_MEM;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_SW(inst) || `IS_SH(inst) || `IS_SB(inst))
+    begin
+      exe_fun = `ALU_ADD;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_IMS;
+      mem_wen = `MEN_S;  // Will be adjusted based on size
+      rf_wen  = `REN_X;
+      wb_sel  = `WB_X;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_ADD(inst))
+    begin
+      exe_fun = `ALU_ADD;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_RS2;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_ALU;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_ADDI(inst))
+    begin
+      exe_fun = `ALU_ADD;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_IMI;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_ALU;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_SUB(inst))
+    begin
+      exe_fun = `ALU_SUB;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_RS2;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_ALU;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_AND(inst))
+    begin
+      exe_fun = `ALU_AND;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_RS2;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_ALU;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_OR(inst))
+    begin
+      exe_fun = `ALU_OR;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_RS2;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_ALU;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_XOR(inst))
+    begin
+      exe_fun = `ALU_XOR;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_RS2;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_ALU;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_ANDI(inst))
+    begin
+      exe_fun = `ALU_AND;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_IMI;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_ALU;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_ORI(inst))
+    begin
+      exe_fun = `ALU_OR;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_IMI;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_ALU;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_XORI(inst))
+    begin
+      exe_fun = `ALU_XOR;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_IMI;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_ALU;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_SLL(inst))
+    begin
+      exe_fun = `ALU_SLL;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_RS2;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_ALU;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_SRL(inst))
+    begin
+      exe_fun = `ALU_SRL;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_RS2;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_ALU;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_SRA(inst))
+    begin
+      exe_fun = `ALU_SRA;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_RS2;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_ALU;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_SLLI(inst))
+    begin
+      exe_fun = `ALU_SLL;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_IMI;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_ALU;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_SRLI(inst))
+    begin
+      exe_fun = `ALU_SRL;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_IMI;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_ALU;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_SRAI(inst))
+    begin
+      exe_fun = `ALU_SRA;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_IMI;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_ALU;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_SLT(inst))
+    begin
+      exe_fun = `ALU_SLT;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_RS2;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_ALU;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_SLTU(inst))
+    begin
+      exe_fun = `ALU_SLTU;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_RS2;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_ALU;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_SLTI(inst))
+    begin
+      exe_fun = `ALU_SLT;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_IMI;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_ALU;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_SLTIU(inst))
+    begin
+      exe_fun = `ALU_SLTU;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_IMI;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_ALU;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_BEQ(inst))
+    begin
+      exe_fun = `BR_BEQ;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_RS2;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_X;
+      wb_sel  = `WB_X;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_BNE(inst))
+    begin
+      exe_fun = `BR_BNE;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_RS2;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_X;
+      wb_sel  = `WB_X;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_BGE(inst))
+    begin
+      exe_fun = `BR_BGE;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_RS2;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_X;
+      wb_sel  = `WB_X;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_BGEU(inst))
+    begin
+      exe_fun = `BR_BGEU;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_RS2;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_X;
+      wb_sel  = `WB_X;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_BLT(inst))
+    begin
+      exe_fun = `BR_BLT;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_RS2;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_X;
+      wb_sel  = `WB_X;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_BLTU(inst))
+    begin
+      exe_fun = `BR_BLTU;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_RS2;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_X;
+      wb_sel  = `WB_X;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_JAL(inst))
+    begin
+      exe_fun = `ALU_ADD;
+      op1_sel = `OP1_PC;
+      op2_sel = `OP2_IMJ;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_PC;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_JALR(inst))
+    begin
+      exe_fun = `ALU_JALR;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_IMI;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_PC;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_LUI(inst))
+    begin
+      exe_fun = `ALU_ADD;
+      op1_sel = `OP1_X;
+      op2_sel = `OP2_IMU;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_ALU;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_AUIPC(inst))
+    begin
+      exe_fun = `ALU_ADD;
+      op1_sel = `OP1_PC;
+      op2_sel = `OP2_IMU;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_ALU;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_CSRRW(inst))
+    begin
+      exe_fun = `ALU_COPY1;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_X;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_CSR;
+      csr_cmd = `CSR_W;
+    end
+    else if (`IS_CSRRWI(inst))
+    begin
+      exe_fun = `ALU_COPY1;
+      op1_sel = `OP1_IMZ;
+      op2_sel = `OP2_X;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_CSR;
+      csr_cmd = `CSR_W;
+    end
+    else if (`IS_CSRRS(inst))
+    begin
+      exe_fun = `ALU_COPY1;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_X;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_CSR;
+      csr_cmd = `CSR_S;
+    end
+    else if (`IS_CSRRSI(inst))
+    begin
+      exe_fun = `ALU_COPY1;
+      op1_sel = `OP1_IMZ;
+      op2_sel = `OP2_X;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_CSR;
+      csr_cmd = `CSR_S;
+    end
+    else if (`IS_CSRRC(inst))
+    begin
+      exe_fun = `ALU_COPY1;
+      op1_sel = `OP1_RS1;
+      op2_sel = `OP2_X;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_CSR;
+      csr_cmd = `CSR_C;
+    end
+    else if (`IS_CSRRCI(inst))
+    begin
+      exe_fun = `ALU_COPY1;
+      op1_sel = `OP1_IMZ;
+      op2_sel = `OP2_X;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_S;
+      wb_sel  = `WB_CSR;
+      csr_cmd = `CSR_C;
+    end
+    else if (`IS_ECALL(inst))
+    begin
+      exe_fun = `ALU_X;
+      op1_sel = `OP1_X;
+      op2_sel = `OP2_X;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_X;
+      wb_sel  = `WB_X;
+      csr_cmd = `CSR_E;
+    end
+    else if (`IS_EBREAK(inst))
+    begin
+      exe_fun = `ALU_X;
+      op1_sel = `OP1_X;
+      op2_sel = `OP2_X;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_X;
+      wb_sel  = `WB_X;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_MRET(inst))
+    begin
+      exe_fun = `ALU_X;
+      op1_sel = `OP1_X;
+      op2_sel = `OP2_X;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_X;
+      wb_sel  = `WB_X;
+      csr_cmd = `CSR_X;
+    end
+    else if (`IS_FENCE_I(inst))
+    begin
+      // FENCE.I: Instruction fence - NOP for this implementation
+      // (no instruction cache, Von Neumann architecture)
+      exe_fun = `ALU_X;
+      op1_sel = `OP1_X;
+      op2_sel = `OP2_X;
+      mem_wen = `MEN_X;
+      rf_wen  = `REN_X;
+      wb_sel  = `WB_X;
+      csr_cmd = `CSR_X;
+    end
+  end
+
+  // Operand selection
+  always_comb
+  begin
+    case (op1_sel)
+      `OP1_RS1:
+        op1_data = rs1_data;
+      `OP1_PC:
+        op1_data = pc;
+      `OP1_IMZ:
+        op1_data = imm_z;
+      default:
+        op1_data = 32'd0;
+    endcase
+
+    case (op2_sel)
+      `OP2_RS2:
+        op2_data = rs2_data;
+      `OP2_IMI:
+        op2_data = imm_i;
+      `OP2_IMS:
+        op2_data = imm_s;
+      `OP2_IMJ:
+        op2_data = imm_j;
+      `OP2_IMU:
+        op2_data = imm_u;
+      default:
+        op2_data = 32'd0;
+    endcase
+  end
+
+  // ALU
+  always_comb
+  begin
+    case (exe_fun)
+      `ALU_ADD:
+        alu_out = op1_data + op2_data;
+      `ALU_SUB:
+        alu_out = op1_data - op2_data;
+      `ALU_AND:
+        alu_out = op1_data & op2_data;
+      `ALU_OR:
+        alu_out = op1_data | op2_data;
+      `ALU_XOR:
+        alu_out = op1_data ^ op2_data;
+      `ALU_SLL:
+        alu_out = op1_data << op2_data[4:0];
+      `ALU_SRL:
+        alu_out = op1_data >> op2_data[4:0];
+      `ALU_SRA:
+        alu_out = $signed(op1_data) >>> op2_data[4:0];
+      `ALU_SLT:
+        alu_out = ($signed(op1_data) < $signed(op2_data)) ? 32'd1 : 32'd0;
+      `ALU_SLTU:
+        alu_out = (op1_data < op2_data) ? 32'd1 : 32'd0;
+      `ALU_JALR:
+        alu_out = (op1_data + op2_data) & ~32'd1;
+      `ALU_COPY1:
+        alu_out = op1_data;
+      default:
+        alu_out = 32'd0;
+    endcase
+
+    case (exe_fun)
+      `BR_BEQ:
+        br_flg = (op1_data == op2_data);
+      `BR_BNE:
+        br_flg = (op1_data != op2_data);
+      `BR_BLT:
+        br_flg = ($signed(op1_data) < $signed(op2_data));
+      `BR_BGE:
+        br_flg = ($signed(op1_data) >= $signed(op2_data));
+      `BR_BLTU:
+        br_flg = (op1_data < op2_data);
+      `BR_BGEU:
+        br_flg = (op1_data >= op2_data);
+      default:
+        br_flg = 1'b0;
+    endcase
+  end
+
+  // CSR address
+  assign csr_addr = (csr_cmd == `CSR_E) ? `CSR_ADDR_MCAUSE : inst[31:20];
+
+  // CSR read data (only debug CSRs accessible in debug mode)
+  always_comb
+  begin
+    case (csr_addr)
+      `CSR_ADDR_MTVEC:
+        csr_rdata = mtvec;
+      `CSR_ADDR_MCAUSE:
+        csr_rdata = mcause;
+      `CSR_ADDR_MEPC:
+        csr_rdata = mepc;
+      `CSR_ADDR_MSTATUS:
+        csr_rdata = mstatus;
+      `CSR_ADDR_DCSR:
+        csr_rdata = debug_mode ? dcsr : 32'd0;
+      `CSR_ADDR_DPC:
+        csr_rdata = debug_mode ? dpc : 32'd0;
+      `CSR_ADDR_DSCRATCH0, `CSR_ADDR_DSCRATCH1:
+        csr_rdata = debug_mode ? csr_file[csr_addr] : 32'd0;
+      `CSR_ADDR_TSELECT:
+        csr_rdata = {30'd0, tselect};
+      `CSR_ADDR_TDATA1:
+        csr_rdata = tdata1[tselect];
+      `CSR_ADDR_TDATA2:
+        csr_rdata = tdata2[tselect];
+      12'hF14:
+      begin  // mhartid
+        csr_rdata = csr_file[csr_addr];
+      end
+      default:
+        csr_rdata = csr_file[csr_addr];
+    endcase
+  end
+
+  // CSR write data
+  always_comb
+  begin
+    case (csr_cmd)
+      `CSR_W:
+        csr_wdata = op1_data;
+      `CSR_S:
+        csr_wdata = csr_rdata | op1_data;
+      `CSR_C:
+        csr_wdata = csr_rdata & ~op1_data;
+      `CSR_E:
+        csr_wdata = 32'd11;
+      // Environment call from M-mode
+      default:
+        csr_wdata = 32'd0;
+    endcase
+  end
+
+  // This logic is correct for driving the dmem ports
+  always_ff @(posedge clk or negedge reset_n)
+  begin
+    if (!reset_n)
+    begin
+      dmem_addr   <= 32'd0;
+      dmem_wdata  <= 32'd0;
+      dmem_wvalid <= 2'b00;
+    end
+    else
+    begin
+      if (proc_state == IMEM_DONE)
+      begin
+        dmem_addr <= alu_out;
+
+        // For SW, prepare data immediately
+        if (`IS_SW(inst))
+        begin
+          dmem_wdata <= rs2_data;
+        end
+        // For SB/SH, data will be prepared after RMW read
+        // mem_inst and mem_addr_saved are saved in state transition logic
+      end
+      else if (proc_state == DMEM_READ && dmem_rvalid &&
+               (mem_wen != `MEN_X) && (`IS_SB(mem_inst) || `IS_SH(mem_inst)))
+      begin
+        // Read-Modify-Write: Merge new data with read data
+        if (`IS_SB(mem_inst))
+        begin
+          // Store Byte: Replace one byte
+          case (dmem_addr[1:0])
+            2'b00:
+              dmem_wdata <= {dmem_rdata[31:8], rs2_data[7:0]};
+            2'b01:
+              dmem_wdata <= {dmem_rdata[31:16], rs2_data[7:0], dmem_rdata[7:0]};
+            2'b10:
+              dmem_wdata <= {dmem_rdata[31:24], rs2_data[7:0], dmem_rdata[15:0]};
+            2'b11:
+              dmem_wdata <= {rs2_data[7:0], dmem_rdata[23:0]};
+          endcase
+        end
+        else if (`IS_SH(mem_inst))
+        begin
+          // Store Halfword: Replace halfword
+          case (dmem_addr[1])
+            1'b0:
+              dmem_wdata <= {dmem_rdata[31:16], rs2_data[15:0]};
+            1'b1:
+              dmem_wdata <= {rs2_data[15:0], dmem_rdata[15:0]};
+          endcase
+        end
+      end
+
+      if (proc_state == DMEM_WRITE)
+      begin
+        // All stores now write full 32-bit word
+        dmem_wvalid <= 2'b11;
+
+        // Check for tohost write (RISC-V test completion)
+        if (dmem_addr == 32'h80001000 && mem_wen != 2'b00)
+        begin
+          exit_flag <= 1'b1;  // Test completed
+        end
+      end
+      else
+      begin
+        dmem_wvalid <= 2'b00;
+      end
+    end
+  end
+
+  // This logic is correct for driving dmem_rready
+  always_ff @(posedge clk or negedge reset_n)
+  begin
+    if (!reset_n)
+    begin
+      dmem_rready <= 1'b0;
+      rmw_read_data <= 32'd0;
+    end
+    else
+    begin
+      if (proc_state == DMEM_READ)
+      begin
+        dmem_rready <= 1'b1;
+        // Capture read data for Read-Modify-Write (SB/SH)
+        if (dmem_rvalid)
+        begin
+          rmw_read_data <= dmem_rdata;
+        end
+      end
+      else
+      begin
+        dmem_rready <= 1'b0;
+      end
+    end
+  end
+
+  // ============================================================================
+  // Memory Access Tracking for Triggers
+  // ============================================================================
+  // Track memory operations for load/store trigger matching
+  always_ff @(posedge clk or negedge reset_n)
+  begin
+    if (!reset_n)
+    begin
+      mem_load_req    <= 1'b0;
+      mem_store_req   <= 1'b0;
+      mem_access_addr <= 32'h0;
+    end
+    else
+    begin
+      // Capture memory access information when operations occur
+      if (proc_state == DMEM_READ && dmem_rready)
+      begin
+        mem_load_req    <= 1'b1;
+        mem_access_addr <= dmem_addr;
+      end
+      else
+      begin
+        mem_load_req <= 1'b0;
+      end
+
+      if (proc_state == DMEM_WRITE && (dmem_wvalid != 2'b00))
+      begin
+        mem_store_req   <= 1'b1;
+        mem_access_addr <= dmem_addr;
+      end
+      else
+      begin
+        mem_store_req <= 1'b0;
+      end
+    end
+  end
+
+  // Writeback data selection
+  always_comb
+  begin
+    case (wb_sel)
+      `WB_MEM:
+      begin
+        // Handle narrower loads with sign/zero extension
+        // Select correct byte/halfword based on address alignment
+        // Use saved mem_inst and mem_addr_saved
+        if (`IS_LB(mem_inst))
+        begin
+          case (mem_addr_saved[1:0])
+            2'b00:
+              wb_data = {{24{dmem_rdata[7]}}, dmem_rdata[7:0]};
+            2'b01:
+              wb_data = {{24{dmem_rdata[15]}}, dmem_rdata[15:8]};
+            2'b10:
+              wb_data = {{24{dmem_rdata[23]}}, dmem_rdata[23:16]};
+            2'b11:
+              wb_data = {{24{dmem_rdata[31]}}, dmem_rdata[31:24]};
+          endcase
+        end
+        else if (`IS_LBU(mem_inst))
+        begin
+          case (mem_addr_saved[1:0])
+            2'b00:
+              wb_data = {24'd0, dmem_rdata[7:0]};
+            2'b01:
+              wb_data = {24'd0, dmem_rdata[15:8]};
+            2'b10:
+              wb_data = {24'd0, dmem_rdata[23:16]};
+            2'b11:
+              wb_data = {24'd0, dmem_rdata[31:24]};
+          endcase
+        end
+        else if (`IS_LH(mem_inst))
+        begin
+          case (mem_addr_saved[1])
+            1'b0:
+              wb_data = {{16{dmem_rdata[15]}}, dmem_rdata[15:0]};
+            1'b1:
+              wb_data = {{16{dmem_rdata[31]}}, dmem_rdata[31:16]};
+          endcase
+        end
+        else if (`IS_LHU(mem_inst))
+        begin
+          case (mem_addr_saved[1])
+            1'b0:
+              wb_data = {16'd0, dmem_rdata[15:0]};
+            1'b1:
+              wb_data = {16'd0, dmem_rdata[31:16]};
+          endcase
+        end
+        else
+        begin
+          // Default to full word load
+          wb_data = dmem_rdata;
+        end
+      end
+      `WB_PC:
+        wb_data = pc + 32'd4;
+      `WB_CSR:
+        wb_data = csr_rdata;
+      `WB_ALU:
+        wb_data = alu_out;
+      default:
+        wb_data = 32'd0;
+    endcase
+  end
+
+  // PC update and register write
+  integer i, j;
+  always_ff @(posedge clk or negedge reset_n)
+  begin
+    if (!reset_n)
+    begin
+      pc <= START_ADDR;
+      mem_inst <= 32'd0;  // Initialize saved memory instruction
+      mem_addr_saved <= 32'd0;
+      for (i = 0; i < 32; i = i + 1)
+      begin
+        register_file[i] <= 32'd0;
+      end
+      for (j = 0; j < 4096; j = j + 1)
+      begin
+        csr_file[j] <= 32'd0;
+      end
+
+      // Initialize M-Mode CSRs
+      mtvec        <= 32'd0;
+      mcause       <= 32'd0;
+      mepc         <= 32'd0;
+      mstatus_mie  <= 1'b0;  // Interrupts disabled at reset
+      mstatus_mpie <= 1'b0;
+      mstatus_mpp  <= 2'b11;  // Previous privilege = M-mode
+      // Initialize Debug CSRs
+      dcsr_cause   <= 3'd0;
+      dcsr_step    <= 1'b0;
+      dcsr_prv     <= 2'b11;
+      // M-mode
+      debug_mode   <= 1'b0;
+      // Always start in normal mode
+      // Initialize Trigger CSRs
+      tselect      <= 2'd0;
+      for (int k = 0; k < NUM_TRIGGERS; k++)
+      begin
+        tdata1[k] <= 32'd0;
+        tdata2[k] <= 32'd0;
+      end
+      // Initialize mhartid CSR (0xF14 = 3860) with HART_ID parameter
+      csr_file[12'hF14] <= HART_ID;
+      exit_flag         <= 1'b0;
+    end
+    else  // Normal operation
+    begin
+      // ========================================================================
+      // Register File and CSR Writes - Execute every cycle (not gated by stall)
+      // This ensures instructions complete their writeback even during APB waits
+      // ========================================================================
+
+      // Write to register file (allow writes in debug mode for debug ROM execution)
+      if (proc_state == DMEM_DONE || (proc_state == IMEM_DONE && wb_sel != `WB_MEM))
+      begin
+        if (rf_wen == `REN_S && rd_addr != 5'd0)
+        begin
+          register_file[rd_addr] <= wb_data;
+          // Note: exit_flag is controlled by tohost writes in memory write logic
+        end
+      end
+
+
+      // Write to CSR (including M-Mode and Debug registers)
+      // For CSRRS/CSRRC, don't write CSR if rs1=x0 (read-only operation)
+      // This logic should also only execute when the instruction is ready
+      if (proc_state == IMEM_DONE)
+      begin
+        if (csr_cmd == `CSR_W ||
+            ((csr_cmd == `CSR_S || csr_cmd == `CSR_C) && rs1_addr != 5'd0) ||
+            csr_cmd == `CSR_E)
+        begin
+          case (csr_addr)
+            `CSR_ADDR_MTVEC:
+              mtvec <= csr_wdata;
+            `CSR_ADDR_MCAUSE:
+              mcause <= csr_wdata;
+            `CSR_ADDR_MEPC:
+              mepc <= csr_wdata;
+            `CSR_ADDR_MSTATUS:
+            begin
+              // Only update specific writable fields of mstatus
+              mstatus_mie  <= csr_wdata[3];
+              mstatus_mpie <= csr_wdata[7];
+              mstatus_mpp  <= csr_wdata[12:11];
+            end
+            `CSR_ADDR_DCSR:
+            begin
+              // Only update writable fields of dcsr (debug mode only)
+              if (debug_mode)
+              begin
+                // Update individual bit fields instead of full register
+                dcsr_step <= csr_wdata[2];
+                dcsr_prv  <= csr_wdata[1:0];
+                // Note: cause is read-only, set by hardware
+                // Note: other fields like ebreakm, stepie, etc. can be added if needed
+              end
+            end
+            `CSR_ADDR_DPC:
+              if (debug_mode)
+                dpc <= csr_wdata;
+            `CSR_ADDR_DSCRATCH0, `CSR_ADDR_DSCRATCH1:
+              if (debug_mode)
+              begin
+                csr_file[csr_addr] <= csr_wdata;
+              end
+            `CSR_ADDR_TSELECT:
+              tselect <= csr_wdata[1:0];  // Only 2 bits for 4 triggers
+            `CSR_ADDR_TDATA1:
+              tdata1[tselect] <= csr_wdata;
+            `CSR_ADDR_TDATA2:
+              tdata2[tselect] <= csr_wdata;
+            default:
+              csr_file[csr_addr] <= csr_wdata;
+          endcase
+        end
+      end
+
+      // ========================================================================
+      // PC UPDATE LOGIC
+      // This is the single, authoritative block for the PC
+      // ========================================================================
+
+      // Trigger has highest priority (before haltreq)
+      if (trigger_fire && !debug_mode)
+      begin
+        // Enter debug mode due to trigger
+        debug_mode <= 1'b1;
+        dcsr_cause <= `DEBUG_CAUSE_TRIGGER;  // cause = 2 (trigger)
+        dcsr_prv   <= 2'b11;  // M-mode
+        // Save PC of triggering instruction
+        dpc        <= pc;
+        // Jump to Debug ROM entry point
+        pc         <= `DEBUG_ENTRY_POINT;
+      end  // Debug halt request has second highest priority
+      else if (i_haltreq && !debug_mode)
+      begin
+        // Enter debug mode due to halt request
+        debug_mode <= 1'b1;
+        dcsr_cause <= `DEBUG_CAUSE_HALTREQ;  // cause = 3 (halt request)
+        dcsr_prv   <= 2'b11;
+        // M-mode
+        // Save PC of next instruction to be executed
+        dpc        <= pc;
+        // Jump to Debug ROM entry point
+        pc         <= `DEBUG_ENTRY_POINT;
+        // Debug ROM entry address
+      end  // DRET: Exit debug mode
+      else if (
+        `IS_DRET(inst)
+        && debug_mode && instruction_retired)
+      begin  // Must be retired
+        debug_mode <= 1'b0;
+        // Restore PC from DPC
+        pc         <= dpc;
+      end  // ECALL: Machine mode trap
+      else if (
+        `IS_ECALL(inst)
+        && !debug_mode && instruction_retired)
+      begin  // Must be retired
+        // ECALL: Jump to trap handler (mtvec) and save return address
+        pc           <= mtvec;
+        mepc         <= pc + 32'd4;
+        // Save PC of next instruction, not current
+        mcause       <= 32'd11;
+        // Environment call from M-mode (cause code 11)
+        // Update mstatus: save MIE to MPIE, clear MIE, set MPP to M-mode
+        mstatus_mpie <= mstatus_mie;
+        mstatus_mie  <= 1'b0;  // Disable interrupts in trap handler
+        mstatus_mpp  <= 2'b11;
+        // Previous privilege = M-mode
+      end  // EBREAK: In debug mode, jump to debug exception entry (DPC + 4)
+      else if (
+        `IS_EBREAK(inst)
+        && debug_mode && instruction_retired)
+      begin  // Must be retired
+        pc <= `DEBUG_ENTRY_POINT + 32'd4;
+      end
+      else if (`IS_MRET(inst) && !debug_mode && instruction_retired)
+      begin
+        pc           <= mepc;
+        mstatus_mie  <= mstatus_mpie;
+        mstatus_mpie <= 1'b1;
+      end
+      else if (instruction_retired)
+      begin
+        if (br_flg)
+        begin
+          pc <= pc + imm_b;
+        end
+        else if (wb_sel == `WB_PC)
+        begin
+          pc <= alu_out;
+        end
+        else
+        begin
+          pc <= pc + 32'd4;
+        end
+      end
+
+    end  // End of normal operation
+  end
+
+  // Exit signal
+  assign exit = exit_flag;
+
+
+endmodule
