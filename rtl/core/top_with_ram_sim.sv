@@ -19,7 +19,6 @@ module top_with_ram_sim #(
 
     // Debug mode status
     output logic debug_mode_o,
-    output logic trigger_fire_o,
 
     // External trigger inputs/outputs
     input  logic [3:0] i_external_trigger,
@@ -119,7 +118,6 @@ module top_with_ram_sim #(
   logic        dmem_rvalid;
 
   logic        debug_mode;
-  logic        trigger_fire;
   logic        m_timer_interrupt;
 
   // CLINT signals - internal APB interface
@@ -631,7 +629,6 @@ module top_with_ram_sim #(
          // Debug interface
          .i_haltreq      (i_haltreq),
          .debug_mode_o   (debug_mode),
-         .trigger_fire_o (trigger_fire),
 
          // External triggers
          .i_external_trigger (i_external_trigger),
@@ -641,8 +638,7 @@ module top_with_ram_sim #(
   // =================================================================
   //  Output Assignments
   // =================================================================
-  assign debug_mode_o   = debug_mode;
-  assign trigger_fire_o = trigger_fire;
+  assign debug_mode_o = debug_mode;
 
   // RISC-V test support - expose gp register (x3)
   assign gp = cpu.register_file[3];

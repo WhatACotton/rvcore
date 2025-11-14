@@ -27,7 +27,6 @@ module core #(
     // Debug Module interface
     input  logic        i_haltreq,             // Debug halt request from DM
     output logic        debug_mode_o,          // Debug mode status output
-    output logic        trigger_fire_o,        // Trigger fired (for external monitoring)
     // External trigger inputs (for Sdtrig extension - Type 7)
     // Spec allows up to 16 inputs, using 4 for simplicity
     input  logic [3:0]  i_external_trigger,    // External trigger inputs [0:3]
@@ -500,7 +499,6 @@ module core #(
 
   // Combine trigger signals
   assign trigger_fire = |trigger_action_debug;
-  assign trigger_fire_o = trigger_fire;
   assign trigger_exception_req = |trigger_action_exception;
   assign o_trigger_external[0] = |trigger_action_ext0;
   assign o_trigger_external[1] = |trigger_action_ext1;
