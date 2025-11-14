@@ -177,7 +177,7 @@ async def test_trigger_csr_access(dut):
     dut._log.info("Testing trigger CSR access")
     
     # Initially, trigger should not be fired
-    initial_trigger_fire = int(dut.trigger_fire_o.value)
+    initial_trigger_fire = int(dut.trigger_fire.value)
     assert initial_trigger_fire == 0, \
         f"Initial trigger_fire should be 0, got {initial_trigger_fire}"
     
@@ -200,7 +200,7 @@ async def test_trigger_csr_access(dut):
     await ClockCycles(dut.clk, 2)
     
     # After configuration, trigger should still not be fired
-    post_config_trigger_fire = int(dut.trigger_fire_o.value)
+    post_config_trigger_fire = int(dut.trigger_fire.value)
     assert post_config_trigger_fire == 0, \
         f"Trigger should not fire after configuration, got {post_config_trigger_fire}"
     
@@ -218,7 +218,7 @@ async def test_execution_trigger(dut):
     trigger_pc = 0x100
     
     # Initial state verification
-    initial_trigger_fire = int(dut.trigger_fire_o.value)
+    initial_trigger_fire = int(dut.trigger_fire.value)
     initial_debug_mode = int(dut.debug_mode_o.value)
     assert initial_trigger_fire == 0, \
         f"Initial trigger should not fire, got {initial_trigger_fire}"
@@ -238,7 +238,7 @@ async def test_execution_trigger(dut):
     await ClockCycles(dut.clk, 5)
     
     # Verify configuration didn't trigger
-    post_config_trigger = int(dut.trigger_fire_o.value)
+    post_config_trigger = int(dut.trigger_fire.value)
     post_config_debug = int(dut.debug_mode_o.value)
     assert post_config_trigger == 0, \
         f"Trigger should not fire after config, got {post_config_trigger}"
@@ -253,7 +253,7 @@ async def test_execution_trigger(dut):
     
     # Verify still not in debug mode
     debug_mode_before = int(dut.debug_mode_o.value)
-    trigger_fire_before = int(dut.trigger_fire_o.value)
+    trigger_fire_before = int(dut.trigger_fire.value)
     assert debug_mode_before == 0, \
         f"Should not be in debug mode before PC match, got {debug_mode_before}"
     assert trigger_fire_before == 0, \
@@ -273,7 +273,7 @@ async def test_trigger_fire_signal(dut):
     
     # Initially, trigger should not be fired
     await ClockCycles(dut.clk, 2)
-    trigger_fire_initial = int(dut.trigger_fire_o.value)
+    trigger_fire_initial = int(dut.trigger_fire.value)
     assert trigger_fire_initial == 0, \
         f"Trigger should not be fired initially, got {trigger_fire_initial}"
     dut._log.info(f"✓ Initial trigger_fire_o: {trigger_fire_initial}")
@@ -286,7 +286,7 @@ async def test_trigger_fire_signal(dut):
     await ClockCycles(dut.clk, 5)
     
     # Verify trigger still not fired after configuration
-    trigger_fire_after_config = int(dut.trigger_fire_o.value)
+    trigger_fire_after_config = int(dut.trigger_fire.value)
     assert trigger_fire_after_config == 0, \
         f"Trigger should not fire after config alone, got {trigger_fire_after_config}"
     
@@ -304,7 +304,7 @@ async def test_load_store_trigger(dut):
     watch_addr = 0x200
     
     # Verify initial state
-    initial_trigger = int(dut.trigger_fire_o.value)
+    initial_trigger = int(dut.trigger_fire.value)
     initial_debug = int(dut.debug_mode_o.value)
     assert initial_trigger == 0, f"Initial trigger should be 0, got {initial_trigger}"
     assert initial_debug == 0, f"Initial debug mode should be 0, got {initial_debug}"
@@ -322,7 +322,7 @@ async def test_load_store_trigger(dut):
     await ClockCycles(dut.clk, 5)
     
     # Verify configuration didn't trigger
-    post_config_trigger = int(dut.trigger_fire_o.value)
+    post_config_trigger = int(dut.trigger_fire.value)
     assert post_config_trigger == 0, \
         f"Trigger should not fire after config, got {post_config_trigger}"
     
@@ -348,7 +348,7 @@ async def test_load_store_trigger(dut):
     await ClockCycles(dut.clk, 5)
     
     # Verify no trigger on different address
-    final_trigger = int(dut.trigger_fire_o.value)
+    final_trigger = int(dut.trigger_fire.value)
     final_debug = int(dut.debug_mode_o.value)
     assert final_trigger == 0, \
         f"Trigger should not fire for different address, got {final_trigger}"
@@ -390,7 +390,7 @@ async def test_external_trigger(dut):
     await ClockCycles(dut.clk, 2)
     
     # Check initial state - no trigger fired
-    trigger_fire_before = int(dut.trigger_fire_o.value)
+    trigger_fire_before = int(dut.trigger_fire.value)
     debug_mode_before = int(dut.debug_mode_o.value)
     assert trigger_fire_before == 0, \
         f"Initial trigger should be 0, got {trigger_fire_before}"
@@ -425,7 +425,7 @@ async def test_external_trigger(dut):
     await ClockCycles(dut.clk, 3)
     
     # Verify trigger clears but debug mode persists
-    trigger_fire_cleared = int(dut.trigger_fire_o.value)
+    trigger_fire_cleared = int(dut.trigger_fire.value)
     debug_mode_persistent = int(dut.debug_mode_o.value)
     assert trigger_fire_cleared == 0, \
         f"Trigger should clear when input removed, got {trigger_fire_cleared}"
@@ -445,7 +445,7 @@ async def test_multiple_triggers(dut):
     dut._log.info("Testing multiple triggers")
     
     # Verify clean initial state
-    initial_trigger = int(dut.trigger_fire_o.value)
+    initial_trigger = int(dut.trigger_fire.value)
     initial_debug = int(dut.debug_mode_o.value)
     assert initial_trigger == 0, f"Initial trigger should be 0, got {initial_trigger}"
     assert initial_debug == 0, f"Initial debug should be 0, got {initial_debug}"
@@ -458,7 +458,7 @@ async def test_multiple_triggers(dut):
     await ClockCycles(dut.clk, 2)
     
     # Verify no spurious trigger after config 0
-    trigger_after_0 = int(dut.trigger_fire_o.value)
+    trigger_after_0 = int(dut.trigger_fire.value)
     assert trigger_after_0 == 0, \
         f"No trigger after config 0, got {trigger_after_0}"
     
@@ -470,7 +470,7 @@ async def test_multiple_triggers(dut):
     await ClockCycles(dut.clk, 2)
     
     # Verify no spurious trigger after config 1
-    trigger_after_1 = int(dut.trigger_fire_o.value)
+    trigger_after_1 = int(dut.trigger_fire.value)
     assert trigger_after_1 == 0, \
         f"No trigger after config 1, got {trigger_after_1}"
     
@@ -482,7 +482,7 @@ async def test_multiple_triggers(dut):
     await ClockCycles(dut.clk, 2)
     
     # Verify no spurious trigger after config 2
-    trigger_after_2 = int(dut.trigger_fire_o.value)
+    trigger_after_2 = int(dut.trigger_fire.value)
     assert trigger_after_2 == 0, \
         f"No trigger after config 2, got {trigger_after_2}"
     
@@ -493,14 +493,14 @@ async def test_multiple_triggers(dut):
     await ClockCycles(dut.clk, 2)
     
     # Verify no spurious trigger after config 3
-    trigger_after_3 = int(dut.trigger_fire_o.value)
+    trigger_after_3 = int(dut.trigger_fire.value)
     assert trigger_after_3 == 0, \
         f"No trigger after config 3, got {trigger_after_3}"
     
     await ClockCycles(dut.clk, 3)
     
     # Final verification
-    final_trigger = int(dut.trigger_fire_o.value)
+    final_trigger = int(dut.trigger_fire.value)
     final_debug = int(dut.debug_mode_o.value)
     assert final_trigger == 0, \
         f"Final trigger should be 0, got {final_trigger}"
@@ -525,7 +525,7 @@ async def test_trigger_priority(dut):
         return
     
     # Verify initial state
-    initial_trigger = int(dut.trigger_fire_o.value)
+    initial_trigger = int(dut.trigger_fire.value)
     initial_debug = int(dut.debug_mode_o.value)
     assert initial_trigger == 0, f"Initial trigger should be 0, got {initial_trigger}"
     assert initial_debug == 0, f"Initial debug should be 0, got {initial_debug}"
@@ -566,7 +566,7 @@ async def test_trigger_priority(dut):
     await ClockCycles(dut.clk, 3)
     
     # Verify trigger clears but debug persists
-    trigger_cleared = int(dut.trigger_fire_o.value)
+    trigger_cleared = int(dut.trigger_fire.value)
     debug_persistent = int(dut.debug_mode_o.value)
     assert trigger_cleared == 0, \
         f"Trigger should clear, got {trigger_cleared}"
@@ -611,7 +611,7 @@ async def test_trigger_in_debug_mode(dut):
     await ClockCycles(dut.clk, 2)
     
     # Trigger should NOT fire (already in debug mode)
-    trigger_fire = int(dut.trigger_fire_o.value)
+    trigger_fire = int(dut.trigger_fire.value)
     debug_mode_still = int(dut.debug_mode_o.value)
     
     assert trigger_fire == 0, \
@@ -627,7 +627,7 @@ async def test_trigger_in_debug_mode(dut):
     await ClockCycles(dut.clk, 3)
     
     # Final verification
-    final_trigger = int(dut.trigger_fire_o.value)
+    final_trigger = int(dut.trigger_fire.value)
     final_debug = int(dut.debug_mode_o.value)
     assert final_trigger == 0, \
         f"Trigger should remain 0, got {final_trigger}"

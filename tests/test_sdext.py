@@ -332,13 +332,13 @@ async def test_debug_mode_suppresses_triggers(dut):
     assert debug_mode == 1, "Should be in debug mode"
     
     # Check trigger_fire is 0 even though trigger is configured
-    trigger_fire = int(dut.trigger_fire_o.value)
+    trigger_fire = int(dut.cpu.trigger_fire.value)
     assert trigger_fire == 0, f"Triggers should not fire in debug mode, got {trigger_fire}"
     
     # Wait some cycles - trigger should remain suppressed
     await ClockCycles(dut.clk, 5)
     
-    trigger_fire_after = int(dut.trigger_fire_o.value)
+    trigger_fire_after = int(dut.cpu.trigger_fire.value)
     assert trigger_fire_after == 0, "Triggers should stay suppressed in debug mode"
     
     dut._log.info("✓ Triggers correctly suppressed in debug mode")
