@@ -21,6 +21,10 @@ module top_with_ram_sim #(
     output logic debug_mode_o,
     output logic trigger_fire_o,
 
+    // External trigger inputs/outputs
+    input  logic [3:0] i_external_trigger,
+    output logic [1:0] o_trigger_external,
+
     // RISC-V test support - tohost register
     output logic [31:0] tohost,
 
@@ -627,7 +631,11 @@ module top_with_ram_sim #(
          // Debug interface
          .i_haltreq      (i_haltreq),
          .debug_mode_o   (debug_mode),
-         .trigger_fire_o (trigger_fire)
+         .trigger_fire_o (trigger_fire),
+
+         // External triggers
+         .i_external_trigger (i_external_trigger),
+         .o_trigger_external (o_trigger_external)
        );
 
   // =================================================================

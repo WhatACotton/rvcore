@@ -10,15 +10,24 @@ MEMORY
 
 SECTIONS
 {
-    /* Start at address 0 instead of 0x80000000 */
+    /* Start at address 0 */
     . = 0x00000000;
+    
     .text.init : { *(.text.init) } > RAM
-    . = ALIGN(0x1000);
-    .tohost : { *(.tohost) } > RAM
-    . = ALIGN(0x1000);
+    
+    . = ALIGN(4);
     .text : { *(.text) } > RAM
-    . = ALIGN(0x1000);
+    
+    . = ALIGN(4);
     .data : { *(.data) } > RAM
     .bss : { *(.bss) } > RAM
+    
+    /* Place tohost at a fixed address */
+    . = 0x00001000;
+    .tohost : { 
+        tohost = .;
+        . = . + 4;  /* Reserve 4 bytes for tohost */
+    } > RAM
+    
     _end = .;
 }

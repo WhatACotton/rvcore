@@ -52,6 +52,7 @@ PLUSARGS += +NUM_HARTS=$(NUM_HARTS)
 PLUSARGS += +ADDR_WIDTH=$(ADDR_WIDTH)
 PLUSARGS += +DATA_WIDTH=$(DATA_WIDTH)
 EXTRA_ARGS += --trace --trace-structs
+COMPILE_ARGS += -GTOHOST_ADDR=4096
 
 # Verilator-specific settings
 ifeq ($(SIM),verilator)

@@ -83,10 +83,14 @@
 `define CSR_ADDR_DSCRATCH0 12'h7b2
 `define CSR_ADDR_DSCRATCH1 12'h7b3
 
-// Trigger CSR addresses (Sdtrig extension)
-`define CSR_ADDR_TSELECT 12'h7a0
-`define CSR_ADDR_TDATA1 12'h7a1
-`define CSR_ADDR_TDATA2 12'h7a2
+// Trigger CSR addresses (Sdtrig extension - Debug Spec v1.0)
+`define CSR_ADDR_TSELECT  12'h7a0  // Trigger select
+`define CSR_ADDR_TDATA1   12'h7a1  // Trigger data 1
+`define CSR_ADDR_TDATA2   12'h7a2  // Trigger data 2
+`define CSR_ADDR_TDATA3   12'h7a3  // Trigger data 3
+`define CSR_ADDR_TINFO    12'h7a4  // Trigger info
+`define CSR_ADDR_TCONTROL 12'h7a5  // Trigger control
+`define CSR_ADDR_MCONTEXT 12'h7a8  // M-mode context
 
 // Debug cause codes (dcsr.cause)
 `define DEBUG_CAUSE_EBREAK 3'h1

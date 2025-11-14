@@ -152,6 +152,18 @@ test-rv32um: prepare-hex-rv32um sim-rv32um
 .PHONY: test-single
 test-single: sim-single
 
+# Sdtrig (trigger module) tests
+.PHONY: test-sdtrig
+test-sdtrig:
+	@echo "Running Sdtrig (trigger module) tests..."
+	@bash run_sdtrig_tests.sh
+
+# Sdext (external debug extension) tests
+.PHONY: test-sdext
+test-sdext:
+	@echo "Running Sdext (external debug extension) tests..."
+	MODULE=test_sdext $(MAKE) -f Makefile.clint
+
 # List available tests
 .PHONY: list-tests
 list-tests:
