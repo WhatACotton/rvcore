@@ -22,7 +22,7 @@ module top_with_ram_sim #(
 
     // External trigger inputs/outputs
     input  logic [3:0] i_external_trigger,
-    output logic [1:0] o_trigger_external,
+    output logic [1:0] o_external_trigger,
 
     // RISC-V test support - tohost register
     output logic [31:0] tohost,
@@ -632,7 +632,7 @@ module top_with_ram_sim #(
 
          // External triggers
          .i_external_trigger (i_external_trigger),
-         .o_trigger_external (o_trigger_external)
+         .o_external_trigger (o_external_trigger)
        );
 
   // =================================================================

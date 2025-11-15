@@ -247,7 +247,7 @@ async def test_action_8_external_output(dut):
     dut._log.info("Testing action=8 (external output chain 0)")
     
     # Check initial state
-    initial_ext = int(dut.o_trigger_external.value)
+    initial_ext = int(dut.o_external_trigger.value)
     ext0_init = initial_ext & 0x1
     ext1_init = (initial_ext >> 1) & 0x1
     
@@ -269,16 +269,16 @@ async def test_action_8_external_output(dut):
     await ClockCycles(dut.clk, 2)
     
     # Check output
-    ext_after = int(dut.o_trigger_external.value)
+    ext_after = int(dut.o_external_trigger.value)
     ext0_after = ext_after & 0x1
     ext1_after = (ext_after >> 1) & 0x1
     
-    dut._log.info(f"After trigger: o_trigger_external=0b{ext_after:02b} (ext0={ext0_after}, ext1={ext1_after})")
+    dut._log.info(f"After trigger: o_external_trigger=0b{ext_after:02b} (ext0={ext0_after}, ext1={ext1_after})")
     
     assert ext0_after == 1, f"ext0 should be 1 (action=8), got {ext0_after}"
     assert ext1_after == 0, f"ext1 should be 0, got {ext1_after}"
     
-    dut._log.info("✓ Action 8 correctly drives o_trigger_external[0]")
+    dut._log.info("✓ Action 8 correctly drives o_external_trigger[0]")
     
     # Clear
     dut.i_external_trigger.value = 0
@@ -305,16 +305,16 @@ async def test_action_9_external_output(dut):
     await ClockCycles(dut.clk, 2)
     
     # Check output
-    ext_after = int(dut.o_trigger_external.value)
+    ext_after = int(dut.o_external_trigger.value)
     ext0_after = ext_after & 0x1
     ext1_after = (ext_after >> 1) & 0x1
     
-    dut._log.info(f"After trigger: o_trigger_external=0b{ext_after:02b} (ext0={ext0_after}, ext1={ext1_after})")
+    dut._log.info(f"After trigger: o_external_trigger=0b{ext_after:02b} (ext0={ext0_after}, ext1={ext1_after})")
     
     assert ext0_after == 0, f"ext0 should be 0, got {ext0_after}"
     assert ext1_after == 1, f"ext1 should be 1 (action=9), got {ext1_after}"
     
-    dut._log.info("✓ Action 9 correctly drives o_trigger_external[1]")
+    dut._log.info("✓ Action 9 correctly drives o_external_trigger[1]")
     
     # Clear
     dut.i_external_trigger.value = 0
@@ -345,11 +345,11 @@ async def test_both_external_outputs_simultaneous(dut):
     await ClockCycles(dut.clk, 2)
     
     # Both outputs should be active
-    ext_value = int(dut.o_trigger_external.value)
+    ext_value = int(dut.o_external_trigger.value)
     ext0 = ext_value & 0x1
     ext1 = (ext_value >> 1) & 0x1
     
-    dut._log.info(f"Both triggers: o_trigger_external=0b{ext_value:02b}")
+    dut._log.info(f"Both triggers: o_external_trigger=0b{ext_value:02b}")
     
     assert ext0 == 1, f"ext0 should be 1, got {ext0}"
     assert ext1 == 1, f"ext1 should be 1, got {ext1}"

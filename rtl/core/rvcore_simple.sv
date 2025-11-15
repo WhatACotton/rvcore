@@ -32,7 +32,7 @@ module core #(
     input  logic [3:0]  i_external_trigger,    // External trigger inputs [0:3]
     // External trigger outputs (for actions 8/9)
     // Action 8: chain 0 output, Action 9: chain 1 output
-    output logic [1:0]  o_trigger_external     // [0]=action8/chain0, [1]=action9/chain1
+    output logic [1:0]  o_external_trigger     // [0]=action8/chain0, [1]=action9/chain1
   );
   enum logic [2:0] {
          PROC,
@@ -500,8 +500,8 @@ module core #(
   // Combine trigger signals
   assign trigger_fire = |trigger_action_debug;
   assign trigger_exception_req = |trigger_action_exception;
-  assign o_trigger_external[0] = |trigger_action_ext0;
-  assign o_trigger_external[1] = |trigger_action_ext1;
+  assign o_external_trigger[0] = |trigger_action_ext0;
+  assign o_external_trigger[1] = |trigger_action_ext1;
 
   // ============================================================================
 

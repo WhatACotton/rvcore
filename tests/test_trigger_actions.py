@@ -82,8 +82,8 @@ async def test_action_8_external_output(dut):
     dut._log.info("Testing action=8 (external trigger output chain 0)")
     
     # Check initial state
-    initial_ext0 = int(dut.o_trigger_external.value) & 0x1
-    initial_ext1 = (int(dut.o_trigger_external.value) >> 1) & 0x1
+    initial_ext0 = int(dut.o_external_trigger.value) & 0x1
+    initial_ext1 = (int(dut.o_external_trigger.value) >> 1) & 0x1
     assert initial_ext0 == 0, f"Initial ext0 should be 0, got {initial_ext0}"
     assert initial_ext1 == 0, f"Initial ext1 should be 0, got {initial_ext1}"
     dut._log.info(f"✓ Initial external outputs: ext0={initial_ext0}, ext1={initial_ext1}")
@@ -102,21 +102,21 @@ async def test_action_8_external_output(dut):
     await ClockCycles(dut.clk, 2)
     
     # Check external output chain 0
-    ext0_after = int(dut.o_trigger_external.value) & 0x1
-    ext1_after = (int(dut.o_trigger_external.value) >> 1) & 0x1
+    ext0_after = int(dut.o_external_trigger.value) & 0x1
+    ext1_after = (int(dut.o_external_trigger.value) >> 1) & 0x1
     
     dut._log.info(f"After trigger: ext0={ext0_after}, ext1={ext1_after}")
     
     assert ext0_after == 1, f"ext0 should be 1 (action=8), got {ext0_after}"
     assert ext1_after == 0, f"ext1 should be 0, got {ext1_after}"
     
-    dut._log.info(f"✓ Action 8 correctly drives o_trigger_external[0]")
+    dut._log.info(f"✓ Action 8 correctly drives o_external_trigger[0]")
     
     # Clear trigger
     dut.i_external_trigger.value = 0
     await ClockCycles(dut.clk, 2)
     
-    ext0_cleared = int(dut.o_trigger_external.value) & 0x1
+    ext0_cleared = int(dut.o_external_trigger.value) & 0x1
     assert ext0_cleared == 0, f"ext0 should clear to 0, got {ext0_cleared}"
     
     dut._log.info(f"✓ Action 8 test passed")
@@ -143,21 +143,21 @@ async def test_action_9_external_output(dut):
     await ClockCycles(dut.clk, 2)
     
     # Check external output chain 1
-    ext0_after = int(dut.o_trigger_external.value) & 0x1
-    ext1_after = (int(dut.o_trigger_external.value) >> 1) & 0x1
+    ext0_after = int(dut.o_external_trigger.value) & 0x1
+    ext1_after = (int(dut.o_external_trigger.value) >> 1) & 0x1
     
     dut._log.info(f"After trigger: ext0={ext0_after}, ext1={ext1_after}")
     
     assert ext0_after == 0, f"ext0 should be 0, got {ext0_after}"
     assert ext1_after == 1, f"ext1 should be 1 (action=9), got {ext1_after}"
     
-    dut._log.info(f"✓ Action 9 correctly drives o_trigger_external[1]")
+    dut._log.info(f"✓ Action 9 correctly drives o_external_trigger[1]")
     
     # Clear trigger
     dut.i_external_trigger.value = 0
     await ClockCycles(dut.clk, 2)
     
-    ext1_cleared = (int(dut.o_trigger_external.value) >> 1) & 0x1
+    ext1_cleared = (int(dut.o_external_trigger.value) >> 1) & 0x1
     assert ext1_cleared == 0, f"ext1 should clear to 0, got {ext1_cleared}"
     
     dut._log.info(f"✓ Action 9 test passed")
@@ -187,7 +187,7 @@ async def test_multiple_actions_combined(dut):
     await ClockCycles(dut.clk, 2)
     
     # Both outputs should be active
-    ext_outputs = int(dut.o_trigger_external.value)
+    ext_outputs = int(dut.o_external_trigger.value)
     ext0 = ext_outputs & 0x1
     ext1 = (ext_outputs >> 1) & 0x1
     
@@ -202,7 +202,7 @@ async def test_multiple_actions_combined(dut):
     dut.i_external_trigger.value = 0
     await ClockCycles(dut.clk, 2)
     
-    ext_cleared = int(dut.o_trigger_external.value)
+    ext_cleared = int(dut.o_external_trigger.value)
     assert ext_cleared == 0, f"Both outputs should clear, got 0b{ext_cleared:02b}"
     
     dut._log.info(f"✓ Multiple actions combined test passed")
