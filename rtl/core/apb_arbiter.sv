@@ -52,24 +52,20 @@ module apb_arbiter #(
     else
     begin
       current_state <= next_state;
-      // Register the grant decision made in IDLE state
-      if (current_state == IDLE)
+      // Register the grant decision when transitioning to SETUP state
+      if (current_state == IDLE && next_state == SETUP)
       begin
         grant_q <= grant;
-        if (request_0 && request_1)
+        // Update last_grant for round-robin - track which master was granted
+        if (grant[0])
         begin
-          last_grant <= ~last_grant;
+          last_grant <= 1'b0;  // Master 0 was granted
         end
-        else if (request_1)
+        else if (grant[1])
         begin
-          last_grant <= 1'b1;
-        end
-        else if (request_0)
-        begin
-          last_grant <= 1'b0;
+          last_grant <= 1'b1;  // Master 1 was granted
         end
       end
-
     end
   end
 
@@ -112,13 +108,16 @@ module apb_arbiter #(
     begin
       if (request_0 && request_1)
       begin
+        // Both requesting - use last_grant for round-robin
+        // last_grant indicates which master was granted last time
+        // If master 0 was last granted, give priority to master 1
         if (last_grant == 1'b0)
         begin
-          grant[1] = 1'b1;
+          grant[1] = 1'b1;  // Grant master 1 next
         end
         else
         begin
-          grant[0] = 1'b1;
+          grant[0] = 1'b1;  // Grant master 0 next
         end
       end
       else if (request_0)
