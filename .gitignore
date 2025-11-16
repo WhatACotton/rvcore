@@ -3,3 +3,4 @@ sim_build/
 results.xml
 dump.vcd
 sim_build*/
+firmware.hex
