@@ -287,6 +287,11 @@ module core #(
   logic interrupt_trap; // Trap is interrupt (vs exception)
   logic [31:0] trap_cause; // Trap cause value
 
+  // Misaligned access detection
+  logic misaligned_load;   // Load address misaligned
+  logic misaligned_store;  // Store/AMO address misaligned
+  logic misaligned_exception; // Combined misaligned exception flag
+
   // tcontrol fields (trigger control)
   logic tcontrol_mte;   // M-mode trigger enable (bit 3)
   logic tcontrol_mpte;  // M-mode previous trigger enable (bit 7)
@@ -1120,6 +1125,19 @@ module core #(
     endcase
   end
 
+  // Misaligned access detection (DISABLED - not supported)
+  // Non-aligned memory access is not supported, no exception generated
+  always_comb
+  begin
+    misaligned_load = 1'b0;
+    misaligned_store = 1'b0;
+    misaligned_exception = 1'b0;
+    
+    // Note: Misaligned access support is implementation-defined in RISC-V.
+    // This core does not support misaligned access exception handling.
+    // Tests requiring this feature (e.g., rv32ui-p-ma_data) are not supported.
+  end
+
   // CSR address
   assign csr_addr = (csr_cmd == `CSR_E) ? `CSR_ADDR_MCAUSE : inst[31:20];
 
@@ -1212,7 +1230,7 @@ module core #(
         if (`IS_SB(mem_inst))
         begin
           // Store Byte: Replace one byte
-          case (dmem_addr[1:0])
+          case (mem_addr_saved[1:0])
             2'b00:
               dmem_wdata <= {dmem_rdata[31:8], rs2_data[7:0]};
             2'b01:
@@ -1226,7 +1244,7 @@ module core #(
         else if (`IS_SH(mem_inst))
         begin
           // Store Halfword: Replace halfword
-          case (dmem_addr[1])
+          case (mem_addr_saved[1])
             1'b0:
               dmem_wdata <= {dmem_rdata[31:16], rs2_data[15:0]};
             1'b1:

@@ -69,10 +69,8 @@ COMPILE_ARGS += -DDEBUG_AREA_END=32\'h00001000
 # Module parameters for RISC-V tests
 # Tests start at 0x00000000 with custom linker script
 COMPILE_ARGS += -GSTART_ADDR=32\'h00000000
-# tohost is at 0x00001000 with custom linker (fixed at 4KB boundary)
-COMPILE_ARGS += -GTOHOST_ADDR=32\'h00001000
-# tohost is at 0x000006c0 with custom linker (aligned to 4KB in original)
-COMPILE_ARGS += -GTOHOST_ADDR=32\'h000006c0
+# tohost is at 0x00000480 (standard RISC-V test location for -p virtual tests)
+COMPILE_ARGS += -GTOHOST_ADDR=32\'h00000480
 
 # Cocotb settings
 export TEST_NAME

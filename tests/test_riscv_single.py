@@ -101,32 +101,50 @@ async def initialize_memory(dut, memory_dict):
 
 
 def find_tohost_address(test_name):
-    """Find tohost address from disassembly file"""
+    """Find tohost address from hex file
+    
+    The tohost address is typically in the second section of the hex file.
+    We scan the hex file for @address directives.
+    """
+    hex_file = Path(__file__).parent / "firmware.hex"
+    
+    # Try to find tohost from firmware.hex (the actual loaded file)
+    if hex_file.exists():
+        try:
+            addresses = []
+            with open(hex_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('@'):
+                        addr = int(line[1:], 16)
+                        addresses.append(addr)
+            
+            # Second section is typically tohost/fromhost data section
+            if len(addresses) >= 2:
+                tohost_addr = addresses[1]
+                return tohost_addr
+        except Exception as e:
+            pass
+    
+    # Fallback: try disassembly file
     dis_file = Path(__file__).parent / "riscv_test_hex" / f"{test_name}.dis"
-    if not dis_file.exists():
-        return 0x000006c0  # Default fallback
-    
-    try:
-        with open(dis_file, 'r') as f:
-            for line in f:
-                # Look for patterns like:
-                # "00000480 <tohost>:" or
-                # "  3c:   48302023                sw      gp,1152(zero) # 480 <tohost>"
-                if '<tohost>' in line:
-                    # Try to extract address from comment: "# 480 <tohost>"
-                    if '#' in line:
-                        parts = line.split('#')[1].strip().split()
-                        if len(parts) >= 1:
-                            addr_str = parts[0]
+    if dis_file.exists():
+        try:
+            with open(dis_file, 'r') as f:
+                for line in f:
+                    if '<tohost>' in line:
+                        if '#' in line:
+                            parts = line.split('#')[1].strip().split()
+                            if len(parts) >= 1:
+                                addr_str = parts[0]
+                                return int(addr_str, 16)
+                        else:
+                            addr_str = line.split()[0]
                             return int(addr_str, 16)
-                    # Try to extract from label: "00000480 <tohost>:"
-                    else:
-                        addr_str = line.split()[0]
-                        return int(addr_str, 16)
-    except:
-        pass
+        except:
+            pass
     
-    return 0x000006c0  # Default fallback
+    return 0x00000480  # Common RISC-V test default
 
 
 def find_fail_pass_addresses(test_name):
@@ -170,9 +188,16 @@ async def test_riscv_program(dut):
     tohost_addr = find_tohost_address(test_name)
     fail_addr, pass_addr = find_fail_pass_addresses(test_name)
     
+    # Debug: Check what's actually in firmware.hex
+    hex_file = Path(__file__).parent / "firmware.hex"
+    if hex_file.exists():
+        with open(hex_file, 'r') as f:
+            sections = [line.strip() for line in f if line.strip().startswith('@')]
+        dut._log.info(f"firmware.hex sections: {sections}")
+    
     dut._log.info("="*60)
     dut._log.info(f"RISC-V Test: {test_name}")
-    dut._log.info(f"tohost address: 0x{tohost_addr:08x} (from {test_name}.dis)")
+    dut._log.info(f"tohost address: 0x{tohost_addr:08x} (detected from firmware.hex)")
     if fail_addr is not None and pass_addr is not None:
         dut._log.info(f"fail address: 0x{fail_addr:08x}, pass address: 0x{pass_addr:08x}")
     dut._log.info("="*60)
@@ -231,139 +256,172 @@ async def test_riscv_program(dut):
     dut.reset_n.value = 1
     dut._log.info("Reset released, starting execution...")
     
-    # Debug: Monitor PC for first 50 cycles to see execution pattern
-    dut._log.info("Monitoring PC progression...")
-    for i in range(50):
+    # Debug: Monitor PC and memory writes for first 100 cycles to see execution pattern
+    dut._log.info("Monitoring PC progression and memory writes...")
+    for i in range(100):
         await RisingEdge(dut.clk)
         try:
             pc_val = int(dut.cpu.pc.value) if hasattr(dut.cpu, 'pc') else 0
             if i < 10 or i % 5 == 0:  # Log first 10 and every 5th cycle
                 dut._log.info(f"  Cycle {i+1}: PC = 0x{pc_val:08x}")
+            
+            # Monitor ALL memory writes during startup
+            if hasattr(dut, 'dmem_wvalid') and hasattr(dut, 'dmem_addr') and hasattr(dut, 'dmem_wdata'):
+                dmem_wvalid = int(dut.dmem_wvalid.value)
+                if dmem_wvalid != 0:
+                    dmem_addr = int(dut.dmem_addr.value)
+                    dmem_wdata = int(dut.dmem_wdata.value)
+                    dut._log.info(f"  Cycle {i+1}: MEM WRITE addr=0x{dmem_addr:08x}, data=0x{dmem_wdata:08x}, wvalid={dmem_wvalid}")
         except:
             pass
     
-    # Monitor both gp register (x3) and tohost for test results
-    # Primary: gp register (standard RISC-V test method)
-    # - gp = 0: test in progress
-    # - gp = 1: all tests passed
-    # - gp > 1: test failed
-    # Fallback: tohost memory location
-    # - tohost = 1: pass
-    # - tohost > 1: fail
+    # Monitor tohost register for test completion
+    # RISC-V test standard:
+    # - tohost = 0: test in progress
+    # - tohost = 1: test passed
+    # - tohost > 1: test failed (value encodes failure info)
+    
+    dut._log.info(f"Primary tohost address: 0x{tohost_addr:08x}")
+    dut._log.info("Also monitoring RTL tohost output register")
     
     max_cycles = 200000
+    prev_tohost = 0
     prev_gp_val = 0
-    tohost_val = 0
-    debug_load_count = 0
-    first_test_mem_access = False  # Track first memory access in test
+    tohost_write_detected = False
+    prev_pc = 0
+    same_pc_count = 0
+    
+    # Alternative: also check memory at tohost address
+    # Calculate word address for memory access
+    tohost_word_addr = tohost_addr >> 2
     
     for cycle in range(max_cycles):
         await RisingEdge(dut.clk)
         
+        # Detect infinite loops (PC stuck at same location)
+        try:
+            if hasattr(dut.cpu, 'pc'):
+                current_pc = int(dut.cpu.pc.value)
+                if current_pc == prev_pc:
+                    same_pc_count += 1
+                    if same_pc_count == 1000:
+                        inst = int(dut.cpu.inst.value) if hasattr(dut.cpu, 'inst') else 0
+                        tohost_val = int(dut.tohost.value) if hasattr(dut, 'tohost') else -1
+                        gp_val = int(dut.gp.value) if hasattr(dut, 'gp') else 0
+                        dut._log.warning(f"PC stuck at 0x{current_pc:08x} for 1000 cycles")
+                        dut._log.warning(f"  inst=0x{inst:08x}, tohost=0x{tohost_val:08x}, gp=0x{gp_val:08x}")
+                        # Check if we're waiting for something
+                        proc_state = int(dut.cpu.proc_state.value) if hasattr(dut.cpu, 'proc_state') else -1
+                        dut._log.warning(f"  proc_state = {proc_state}")
+                        
+                        # This might be the self-loop after test completion
+                        # Check if tohost has a value indicating completion
+                        if tohost_val == 1:
+                            dut._log.info("="*60)
+                            dut._log.info(f"RISC-V TEST PASSED (detected via infinite loop with tohost=1)")
+                            dut._log.info(f"Completed at cycle {cycle + 1}, PC stuck at 0x{current_pc:08x}")
+                            dut._log.info("="*60)
+                            return  # Test passed!
+                        elif tohost_val > 1:
+                            test_case = tohost_val >> 1
+                            dut._log.error("="*60)
+                            dut._log.error(f"RISC-V TEST FAILED (detected via infinite loop with tohost={tohost_val})")
+                            dut._log.error(f"Test case #{test_case} failed")
+                            dut._log.error("="*60)
+                            assert False, f"Test '{test_name}' failed: test case #{test_case}"
+                else:
+                    same_pc_count = 0
+                prev_pc = current_pc
+        except (AttributeError, ValueError) as e:
+            pass
         
-        # Monitor gp register (x3) for test completion
-        # RISC-V tests use gp register:
-        # - gp = 0: test in progress
-        # - gp = 1: all tests passed
-        # - gp > 1: test failed (gp encodes the failing test case)
+        # Check tohost register for test completion
+        # Method 1: Check RTL's tohost output register
+        tohost_val = 0
+        try:
+            if hasattr(dut, 'tohost'):
+                tohost_val = int(dut.tohost.value)
+                
+                # Log any change in tohost value
+                if tohost_val != prev_tohost:
+                    dut._log.info(f"RTL tohost register changed at cycle {cycle + 1}: 0x{prev_tohost:08x} -> 0x{tohost_val:08x}")
+        except (AttributeError, ValueError) as e:
+            pass
+        
+        # Method 2: If RTL tohost is still 0, try reading directly from memory
+        if tohost_val == 0:
+            try:
+                if hasattr(dut, 'dmem_bram_inst') and hasattr(dut.dmem_bram_inst, 'mem'):
+                    if tohost_word_addr < 4096:  # Within DMEM range
+                        mem_tohost = int(dut.dmem_bram_inst.mem[tohost_word_addr].value)
+                        if mem_tohost != 0:
+                            tohost_val = mem_tohost
+                            if tohost_val != prev_tohost:
+                                dut._log.info(f"Memory tohost[0x{tohost_addr:08x}] changed at cycle {cycle + 1}: 0x{prev_tohost:08x} -> 0x{tohost_val:08x}")
+            except (AttributeError, ValueError, IndexError) as e:
+                pass
+        
+        # Check if test completed
+        try:
+            if tohost_val != prev_tohost and tohost_val != 0:
+                if not tohost_write_detected:
+                    dut._log.info(f"tohost write detected at cycle {cycle + 1}: tohost = {tohost_val} (0x{tohost_val:08x})")
+                    tohost_write_detected = True
+                if tohost_val == 1:
+                        # Test passed
+                        dut._log.info("="*60)
+                        dut._log.info(f"RISC-V TEST PASSED after {cycle + 1} cycles")
+                        dut._log.info(f"tohost = {tohost_val}")
+                        dut._log.info("="*60)
+                        return  # Test passed!
+                else:
+                    # Test failed - tohost encodes failure info
+                    # Typically: tohost = (test_num << 1) | 1
+                    test_case = tohost_val >> 1
+                    gp_val = int(dut.gp.value) if hasattr(dut, 'gp') else 0
+                    pc = int(dut.cpu.pc.value) if hasattr(dut.cpu, 'pc') else 0
+                    
+                    # Read CSR values for debugging
+                    try:
+                        mtvec = int(dut.cpu.mtvec.value) if hasattr(dut.cpu, 'mtvec') else 0
+                        mcause = int(dut.cpu.mcause.value) if hasattr(dut.cpu, 'mcause') else 0
+                        mepc = int(dut.cpu.mepc.value) if hasattr(dut.cpu, 'mepc') else 0
+                        mstatus = int(dut.cpu.mstatus.value) if hasattr(dut.cpu, 'mstatus') else 0
+                    except:
+                        mtvec = mcause = mepc = mstatus = 0
+                    
+                    dut._log.error("="*60)
+                    dut._log.error(f"RISC-V TEST FAILED after {cycle + 1} cycles")
+                    dut._log.error(f"tohost = {tohost_val} (0x{tohost_val:08x})")
+                    dut._log.error(f"gp (x3) = {gp_val}, PC = 0x{pc:08x}")
+                    dut._log.error(f"Test case #{test_case} failed")
+                    dut._log.error(f"CSR state: mtvec=0x{mtvec:08x}, mcause=0x{mcause:08x}, mepc=0x{mepc:08x}, mstatus=0x{mstatus:08x}")
+                    dut._log.error("="*60)
+                    assert False, f"Test '{test_name}' failed: test case #{test_case}"
+                
+                    prev_tohost = tohost_val
+        except (AttributeError, ValueError) as e:
+            pass
+        
+        # Also track gp for debugging
         try:
             if hasattr(dut, 'gp'):
                 gp_val = int(dut.gp.value)
-                
-                    # Check if gp changed (test progress or completion)
                 if gp_val != prev_gp_val:
-                    # Check for completion:
-                    # Pass: gp = 1
-                    # Fail: gp >= 5 and odd (fail routine: gp = (test_num << 1) | 1)
-                    # Test in progress: gp = 2,3,4,... (test number)
-                    
-                    # Log all gp changes to track test progression
-                    pc = int(dut.cpu.pc.value) if hasattr(dut.cpu, 'pc') else 0
-                    if gp_val >= 2 and gp_val <= 10:
-                        # Log test transitions
-                        x14_a4 = int(dut.cpu.register_file[14].value) if hasattr(dut.cpu, 'register_file') else 0
-                        x7_t2 = int(dut.cpu.register_file[7].value) if hasattr(dut.cpu, 'register_file') else 0
-                    # Check for failure: odd gp value AND PC in fail routine (0x3a8-0x3c4)
-                    pc = int(dut.cpu.pc.value) if hasattr(dut.cpu, 'pc') else 0
-                    in_fail_routine = (pc >= 0x3a8 and pc < 0x3c4)
-                    if (gp_val & 1) == 1 and gp_val > 1 and in_fail_routine:
-                        try:
-                            pc = int(dut.cpu.pc.value) if hasattr(dut.cpu, 'pc') else 0
-                            dmem_addr = int(dut.dmem_addr.value) if hasattr(dut, 'dmem_addr') else 0
-                            dmem_rdata = int(dut.dmem_rdata.value) if hasattr(dut, 'dmem_rdata') else 0
-                            proc_state = int(dut.cpu.proc_state.value) if hasattr(dut.cpu, 'proc_state') else -1
-                            
-                            dut._log.info(f"  CPU PC = 0x{pc:08x}, proc_state = {proc_state}")
-                            dut._log.info(f"  Last dmem_addr = 0x{dmem_addr:08x}, dmem_rdata = 0x{dmem_rdata:08x}")
-                            
-                            # Check load instruction processing
-                            if hasattr(dut.cpu, 'mem_inst'):
-                                mem_inst = int(dut.cpu.mem_inst.value) if hasattr(dut.cpu, 'mem_inst') else 0
-                                mem_addr_saved = int(dut.cpu.mem_addr_saved.value) if hasattr(dut.cpu, 'mem_addr_saved') else 0
-                                wb_data = int(dut.cpu.wb_data.value) if hasattr(dut.cpu, 'wb_data') else 0
-                                dut._log.info(f"  Load processing: mem_inst=0x{mem_inst:08x}, mem_addr_saved=0x{mem_addr_saved:08x}, wb_data=0x{wb_data:08x}")
-                            
-                            # Check what's actually at address 0x450
-                            if hasattr(dut, 'dmem_bram_inst') and hasattr(dut.dmem_bram_inst, 'mem'):
-                                word_addr_450 = 0x114  # 0x450 >> 2
-                                mem_val_450 = int(dut.dmem_bram_inst.mem[word_addr_450].value)
-                                dut._log.info(f"  DMEM[0x{word_addr_450:03x}] (addr 0x450) = 0x{mem_val_450:08x}")
-                                
-                                if dmem_addr >= 0x000 and dmem_addr < 0x1000:
-                                    word_addr = (dmem_addr >> 2) & 0xFFF
-                                    mem_val = int(dut.dmem_bram_inst.mem[word_addr].value)
-                                    dut._log.info(f"  DMEM[0x{word_addr:03x}] (addr 0x{dmem_addr:08x}) = 0x{mem_val:08x}")
-                            
-                            # Try to read CPU registers for more context
-                            if hasattr(dut.cpu, 'register_file'):
-                                x2_sp = int(dut.cpu.register_file[2].value)  # sp
-                                x14_a4 = int(dut.cpu.register_file[14].value)  # a4 (result register)
-                                x7_t2 = int(dut.cpu.register_file[7].value)  # t2 (expected value)
-                                dut._log.info(f"  Registers: sp(x2)=0x{x2_sp:08x}, a4(x14)=0x{x14_a4:08x}, t2(x7)=0x{x7_t2:08x}")
-                        except Exception as e:
-                            dut._log.warning(f"Could not dump debug info: {e}")
-                    elif gp_val == 1:
-                        dut._log.info("="*60)
-                        dut._log.info(f"RISC-V TEST PASSED after {cycle + 1} cycles")
-                        dut._log.info(f"gp (x3) = {gp_val}")
-                        dut._log.info("="*60)
-                        return  # Test passed!
-                    
-                    # Check for failure: PC in fail routine
-                    # Fail routine address is extracted from disassembly file
-                    # Normal test progression sets gp to test numbers (2, 3, 4, ..., 22, 23, ...)
-                    # which can be odd, so we can't rely on gp being odd alone
-                    test_failed = False
-                    test_case = 0
-                    pc = 0
-                    try:
-                        pc = int(dut.cpu.pc.value)
-                        
-                        # Use dynamically extracted fail address if available
-                        if fail_addr is not None and pass_addr is not None:
-                            in_fail_routine = (pc >= fail_addr and pc < pass_addr)
-                        else:
-                            # Fallback to old fixed range (for backward compatibility)
-                            in_fail_routine = (pc >= 0x40c and pc < 0x428)
-                        
-                        if (gp_val & 1) == 1 and gp_val > 1 and in_fail_routine:
-                            # Decode test case from gp value
-                            # The fail code does: gp = (test_num << 1) | 1
-                            # So test_num = gp >> 1
-                            test_case = gp_val >> 1
-                            test_failed = True
-                    except Exception as e:
-                        dut._log.warning(f"Could not check PC for failure detection: {e}")
-                    
-                    if test_failed:
-                        dut._log.error("="*60)
-                        dut._log.error(f"RISC-V TEST FAILED after {cycle + 1} cycles")
-                        dut._log.error(f"gp (x3) = {gp_val} (0x{gp_val:08x}), PC = 0x{pc:08x}")
-                        dut._log.error(f"Test case #{test_case} failed")
-                        dut._log.error("="*60)
-                        assert False, f"Test '{test_name}' failed: test case #{test_case}"
-                
-                prev_gp_val = gp_val
+                    prev_gp_val = gp_val
+        except (AttributeError, ValueError) as e:
+            pass
+        
+        # Monitor memory writes to detect tohost stores (debug)
+        try:
+            if hasattr(dut, 'dmem_wvalid') and hasattr(dut, 'dmem_addr') and hasattr(dut, 'dmem_wdata'):
+                dmem_wvalid = int(dut.dmem_wvalid.value)
+                if dmem_wvalid != 0:
+                    dmem_addr = int(dut.dmem_addr.value)
+                    dmem_wdata = int(dut.dmem_wdata.value)
+                    # Log writes to tohost area
+                    if dmem_addr >= 0x6c0 and dmem_addr < 0x700:
+                        dut._log.info(f"Memory write at cycle {cycle + 1}: addr=0x{dmem_addr:08x}, data=0x{dmem_wdata:08x}")
         except (AttributeError, ValueError) as e:
             pass
         
@@ -371,7 +429,7 @@ async def test_riscv_program(dut):
         
         # Progress indicator every 10000 cycles
         if (cycle + 1) % 10000 == 0:
-            dut._log.info(f"  ... {cycle + 1} cycles (gp=0x{prev_gp_val:08x})")
+            dut._log.info(f"  ... {cycle + 1} cycles (tohost=0x{prev_tohost:08x}, gp=0x{prev_gp_val:08x})")
     
     # Test timed out - dump diagnostic info
     dut._log.error("="*60)
