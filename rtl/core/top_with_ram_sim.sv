@@ -4,12 +4,14 @@
 `timescale 1ns / 1ps
 
 module top_with_ram_sim #(
-    parameter int          START_ADDR  = 32'h00000000,
-    parameter int          MEM_SIZE    = 1024 * 1024,   // 1MB
-    parameter int          ADDR_WIDTH  = 13,
-    parameter int          DATA_WIDTH  = 32,
-    parameter int          HART_ID     = 0,             // Hart ID for debug output
-    parameter logic [31:0] TOHOST_ADDR = 32'h80001000   // tohost address for tests
+    parameter int         START_ADDR      = 32'h00000000,
+    parameter int         MEM_SIZE        = 1024 * 1024,   // 1MB
+    parameter int         ADDR_WIDTH      = 13,
+    parameter int         DATA_WIDTH      = 32,
+    parameter int         HART_ID         = 0,             // Hart ID for debug output
+    parameter bit [31:0]  TOHOST_ADDR     = 32'h80001000,  // tohost address for tests
+    parameter bit [31:0]  UART_BASE_ADDR  = 32'h00000100,  // UART base address in APB space
+    parameter bit [31:0]  UART_ADDR_MASK  = 32'h00000FF0   // UART address mask (16-byte region)
 ) (
     input logic clk,
     input logic reset_n,
@@ -50,7 +52,12 @@ module top_with_ram_sim #(
     output logic [DATA_WIDTH-1:0] i_cpu_apb_pwdata,
     input  logic                  o_cpu_apb_pready,
     input  logic [DATA_WIDTH-1:0] o_cpu_apb_prdata,
-    input  logic                  o_cpu_apb_pslverr
+    input  logic                  o_cpu_apb_pslverr,
+
+    // UART interface
+    input  logic                  uart_rx_i,
+    output logic                  uart_tx_o,
+    output logic                  uart_event_o
 );
 
   // =================================================================
@@ -248,15 +255,49 @@ module top_with_ram_sim #(
       .slave_if  (arbiter_out_if.Master)
   );
 
-  // Connect arbiter output to external APB interface
-  assign i_cpu_apb_paddr        = arbiter_out_if.paddr;
-  assign i_cpu_apb_psel         = arbiter_out_if.psel;
-  assign i_cpu_apb_penable      = arbiter_out_if.penable;
-  assign i_cpu_apb_pwrite       = arbiter_out_if.pwrite;
-  assign i_cpu_apb_pwdata       = arbiter_out_if.pwdata;
-  assign arbiter_out_if.pready  = o_cpu_apb_pready;
-  assign arbiter_out_if.prdata  = o_cpu_apb_prdata;
-  assign arbiter_out_if.pslverr = o_cpu_apb_pslverr;
+  // =================================================================
+  //  UART APB Slave
+  // =================================================================
+  logic        uart_psel;
+  logic [31:0] uart_prdata;
+  logic        uart_pready;
+  logic        uart_pslverr;
+  
+  // Decode UART address range using parameters
+  assign uart_psel = arbiter_out_if.psel && 
+                     ((arbiter_out_if.paddr & UART_ADDR_MASK[ADDR_WIDTH-1:0]) == 
+                      UART_BASE_ADDR[ADDR_WIDTH-1:0]);
+  
+  // Instantiate UART
+  apb_uart_sv #(
+      .APB_ADDR_WIDTH(ADDR_WIDTH)
+  ) uart_inst (
+      .CLK     (clk),
+      .RSTN    (reset_n),
+      .PADDR   (arbiter_out_if.paddr),
+      .PWDATA  (arbiter_out_if.pwdata),
+      .PWRITE  (arbiter_out_if.pwrite),
+      .PSEL    (uart_psel),
+      .PENABLE (arbiter_out_if.penable),
+      .PRDATA  (uart_prdata),
+      .PREADY  (uart_pready),
+      .PSLVERR (uart_pslverr),
+      .rx_i    (uart_rx_i),
+      .tx_o    (uart_tx_o),
+      .event_o (uart_event_o)
+  );
+
+  // Connect arbiter output to external APB interface or UART
+  assign i_cpu_apb_paddr   = arbiter_out_if.paddr;
+  assign i_cpu_apb_psel    = arbiter_out_if.psel && !uart_psel;
+  assign i_cpu_apb_penable = arbiter_out_if.penable;
+  assign i_cpu_apb_pwrite  = arbiter_out_if.pwrite;
+  assign i_cpu_apb_pwdata  = arbiter_out_if.pwdata;
+  
+  // Mux response from UART or external APB
+  assign arbiter_out_if.pready  = uart_psel ? uart_pready  : o_cpu_apb_pready;
+  assign arbiter_out_if.prdata  = uart_psel ? uart_prdata  : o_cpu_apb_prdata;
+  assign arbiter_out_if.pslverr = uart_psel ? uart_pslverr : o_cpu_apb_pslverr;
 
   // =================================================================
   //  IMEM APB Master Logic (Debug ROM Access)

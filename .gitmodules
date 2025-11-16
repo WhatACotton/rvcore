@@ -7,3 +7,6 @@
 [submodule "deps/riscv-tests"]
 	path = deps/riscv-tests
 	url = https://github.com/riscv-software-src/riscv-tests.git
+[submodule "deps/apb_uart_sv"]
+	path = deps/apb_uart_sv
+	url = https://github.com/pulp-platform/apb_uart_sv.git

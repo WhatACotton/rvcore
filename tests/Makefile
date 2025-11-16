@@ -34,7 +34,12 @@ VERILOG_SOURCES = \
 	$(RTL_DIR)/*.vh \
 	$(RTL_DIR)/*.svh \
 	$(DEPS_DIR)/apb/src/apb_pkg.sv \
-	$(DEPS_DIR)/apb/src/apb_intf.sv 
+	$(DEPS_DIR)/apb/src/apb_intf.sv \
+	$(DEPS_DIR)/apb_uart_sv/apb_uart.sv \
+	$(DEPS_DIR)/apb_uart_sv/uart_rx.sv \
+	$(DEPS_DIR)/apb_uart_sv/uart_tx.sv \
+	$(DEPS_DIR)/apb_uart_sv/uart_interrupt.sv \
+	$(DEPS_DIR)/apb_uart_sv/io_generic_fifo.sv
 
 # Include directories
 VERILOG_INCLUDE_DIRS = \
@@ -71,6 +76,11 @@ COMPILE_ARGS += -DDEBUG_AREA_END=32\'h00001000
 COMPILE_ARGS += -GSTART_ADDR=32\'h00000000
 # tohost is at 0x00000480 (standard RISC-V test location for -p virtual tests)
 COMPILE_ARGS += -GTOHOST_ADDR=32\'h00000480
+# UART base address (default: 0x100 in APB space)
+UART_BASE ?= 32\'h00000100
+UART_MASK ?= 32\'h00000FF0
+COMPILE_ARGS += -GUART_BASE_ADDR=$(UART_BASE)
+COMPILE_ARGS += -GUART_ADDR_MASK=$(UART_MASK)
 
 # Cocotb settings
 export TEST_NAME
