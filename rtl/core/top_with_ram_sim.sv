@@ -12,7 +12,7 @@ module top_with_ram_sim #(
     parameter bit [31:0]  TOHOST_ADDR     = 32'h80001000,  // tohost address for tests
     parameter bit [31:0]  UART_BASE_ADDR  = 32'h00000100,  // UART base address in APB space
     parameter bit [31:0]  UART_ADDR_MASK  = 32'h00000FF0   // UART address mask (16-byte region)
-) (
+  ) (
     input logic clk,
     input logic reset_n,
 
@@ -58,7 +58,7 @@ module top_with_ram_sim #(
     input  logic                  uart_rx_i,
     output logic                  uart_tx_o,
     output logic                  uart_event_o
-);
+  );
 
   // =================================================================
   //  Internal Memory - Gowin BRAM Implementation
@@ -71,42 +71,55 @@ module top_with_ram_sim #(
   logic init_wen_prev;
 
   // Detect when initialization is ongoing
-  always_ff @(posedge clk or negedge reset_n) begin
-    if (!reset_n) begin
+  always_ff @(posedge clk or negedge reset_n)
+  begin
+    if (!reset_n)
+    begin
       init_wen_prev    <= 1'b0;
       init_in_progress <= 1'b0;
-    end else begin
+    end
+    else
+    begin
       init_wen_prev <= init_wen;
       // Start of initialization (rising edge of init_wen)
-      if (init_wen && !init_wen_prev) begin
+      if (init_wen && !init_wen_prev)
+      begin
         init_in_progress <= 1'b1;
-        if (HART_ID == 1) $display("[Hart %0d] Init START at time %0t", HART_ID, $time);
+        if (HART_ID == 1)
+          $display("[Hart %0d] Init START at time %0t", HART_ID, $time);
       end  // End of initialization (falling edge of init_wen)
-      else if (!init_wen && init_wen_prev) begin
+      else if (!init_wen && init_wen_prev)
+      begin
         init_in_progress <= 1'b0;
-        if (HART_ID == 1) $display("[Hart %0d] Init END at time %0t", HART_ID, $time);
+        if (HART_ID == 1)
+          $display("[Hart %0d] Init END at time %0t", HART_ID, $time);
       end
     end
   end
 
   // Debug: Monitor both harts' debug mode transitions
-  always_ff @(posedge clk) begin
+  always_ff @(posedge clk)
+  begin
     // Monitor CPU reset release
-    if (cpu_reset_n && !$past(cpu_reset_n)) begin
-      $display("[Hart %0d] CPU reset released: PC will be 0x%08x, i_haltreq=%0b at time %0t", 
+    if (cpu_reset_n && !$past(cpu_reset_n))
+    begin
+      $display("[Hart %0d] CPU reset released: PC will be 0x%08x, i_haltreq=%0b at time %0t",
                HART_ID, cpu.pc, i_haltreq, $time);
     end
-    
-    if (cpu_reset_n) begin
+
+    if (cpu_reset_n)
+    begin
       // Monitor debug mode entry/exit with PC and DPC values
-      if (cpu.debug_mode != $past(cpu.debug_mode)) begin
-        $display("[Hart %0d] Debug mode: %0b -> %0b, PC=0x%08x, DPC=0x%08x, i_haltreq=%0b at time %0t", 
+      if (cpu.debug_mode != $past(cpu.debug_mode))
+      begin
+        $display("[Hart %0d] Debug mode: %0b -> %0b, PC=0x%08x, DPC=0x%08x, i_haltreq=%0b at time %0t",
                  HART_ID, $past(cpu.debug_mode), cpu.debug_mode, cpu.pc, cpu.dpc, i_haltreq, $time);
       end
-      
+
       // Monitor DPC changes (indicates resume target address)
-      if (cpu.dpc != $past(cpu.dpc)) begin
-        $display("[Hart %0d] DPC changed: 0x%08x -> 0x%08x at time %0t", 
+      if (cpu.dpc != $past(cpu.dpc))
+      begin
+        $display("[Hart %0d] DPC changed: 0x%08x -> 0x%08x at time %0t",
                  HART_ID, $past(cpu.dpc), cpu.dpc, $time);
       end
     end
@@ -196,28 +209,29 @@ module top_with_ram_sim #(
   //  CLINT (Core-Local Interruptor) Instantiation
   // =================================================================
   clint #(
-      .ADDR_WIDTH     (13),
-      .DATA_WIDTH     (32),
-      .CLINT_BASE_ADDR(CLINT_BASE)
-  ) clint_inst (
-      .clk                (clk),
-      .reset_n            (reset_n),
-      // APB Slave Interface
-      .paddr              (clint_paddr),
-      .psel               (clint_psel),
-      .penable            (clint_penable),
-      .pwrite             (clint_pwrite),
-      .pwdata             (clint_pwdata),
-      .pstrb              (4'hF),
-      .prdata             (clint_prdata),
-      .pready             (clint_pready),
-      .pslverr            (clint_pslverr),
-      // Timer Interrupt Output
-      .m_timer_interrupt_o(m_timer_interrupt)
-  );
+          .ADDR_WIDTH     (13),
+          .DATA_WIDTH     (32),
+          .CLINT_BASE_ADDR(CLINT_BASE)
+        ) clint_inst (
+          .clk                (clk),
+          .reset_n            (reset_n),
+          // APB Slave Interface
+          .paddr              (clint_paddr),
+          .psel               (clint_psel),
+          .penable            (clint_penable),
+          .pwrite             (clint_pwrite),
+          .pwdata             (clint_pwdata),
+          .pstrb              (4'hF),
+          .prdata             (clint_prdata),
+          .pready             (clint_pready),
+          .pslverr            (clint_pslverr),
+          // Timer Interrupt Output
+          .m_timer_interrupt_o(m_timer_interrupt)
+        );
 
   // CLINT APB signals - combinational for simple memory-mapped access
-  always_comb begin
+  always_comb
+  begin
     clint_psel    = is_clint_access && (is_clint_write || is_clint_read);
     clint_penable = clint_psel;  // Assert both in same cycle for 1-cycle response
     clint_pwrite  = is_clint_write;
@@ -230,30 +244,30 @@ module top_with_ram_sim #(
   // =================================================================
   // Internal APB interfaces
   APB #(
-      .ADDR_WIDTH(ADDR_WIDTH),
-      .DATA_WIDTH(DATA_WIDTH)
-  ) imem_apb_if ();
+        .ADDR_WIDTH(ADDR_WIDTH),
+        .DATA_WIDTH(DATA_WIDTH)
+      ) imem_apb_if ();
   APB #(
-      .ADDR_WIDTH(ADDR_WIDTH),
-      .DATA_WIDTH(DATA_WIDTH)
-  ) dmem_apb_if ();
+        .ADDR_WIDTH(ADDR_WIDTH),
+        .DATA_WIDTH(DATA_WIDTH)
+      ) dmem_apb_if ();
   APB #(
-      .ADDR_WIDTH(ADDR_WIDTH),
-      .DATA_WIDTH(DATA_WIDTH)
-  ) arbiter_out_if ();
+        .ADDR_WIDTH(ADDR_WIDTH),
+        .DATA_WIDTH(DATA_WIDTH)
+      ) arbiter_out_if ();
 
   // Instantiate APB arbiter
   apb_arbiter #(
-      .ADDR_WIDTH (ADDR_WIDTH),
-      .DATA_WIDTH (DATA_WIDTH),
-      .NUM_MASTERS(2)
-  ) arbiter_inst (
-      .clk       (clk),
-      .rst_n     (reset_n),
-      .master0_if(imem_apb_if.Slave),
-      .master1_if(dmem_apb_if.Slave),
-      .slave_if  (arbiter_out_if.Master)
-  );
+                .ADDR_WIDTH (ADDR_WIDTH),
+                .DATA_WIDTH (DATA_WIDTH),
+                .NUM_MASTERS(2)
+              ) arbiter_inst (
+                .clk       (clk),
+                .rst_n     (reset_n),
+                .master0_if(imem_apb_if.Slave),
+                .master1_if(dmem_apb_if.Slave),
+                .slave_if  (arbiter_out_if.Master)
+              );
 
   // =================================================================
   //  UART APB Slave
@@ -262,30 +276,30 @@ module top_with_ram_sim #(
   logic [31:0] uart_prdata;
   logic        uart_pready;
   logic        uart_pslverr;
-  
+
   // Decode UART address range using parameters
-  assign uart_psel = arbiter_out_if.psel && 
-                     ((arbiter_out_if.paddr & UART_ADDR_MASK[ADDR_WIDTH-1:0]) == 
-                      UART_BASE_ADDR[ADDR_WIDTH-1:0]);
-  
+  assign uart_psel = arbiter_out_if.psel &&
+         ((arbiter_out_if.paddr & UART_ADDR_MASK[ADDR_WIDTH-1:0]) ==
+          UART_BASE_ADDR[ADDR_WIDTH-1:0]);
+
   // Instantiate UART
   apb_uart_sv #(
-      .APB_ADDR_WIDTH(ADDR_WIDTH)
-  ) uart_inst (
-      .CLK     (clk),
-      .RSTN    (reset_n),
-      .PADDR   (arbiter_out_if.paddr),
-      .PWDATA  (arbiter_out_if.pwdata),
-      .PWRITE  (arbiter_out_if.pwrite),
-      .PSEL    (uart_psel),
-      .PENABLE (arbiter_out_if.penable),
-      .PRDATA  (uart_prdata),
-      .PREADY  (uart_pready),
-      .PSLVERR (uart_pslverr),
-      .rx_i    (uart_rx_i),
-      .tx_o    (uart_tx_o),
-      .event_o (uart_event_o)
-  );
+                .APB_ADDR_WIDTH(ADDR_WIDTH)
+              ) uart_inst (
+                .CLK     (clk),
+                .RSTN    (reset_n),
+                .PADDR   (arbiter_out_if.paddr),
+                .PWDATA  (arbiter_out_if.pwdata),
+                .PWRITE  (arbiter_out_if.pwrite),
+                .PSEL    (uart_psel),
+                .PENABLE (arbiter_out_if.penable),
+                .PRDATA  (uart_prdata),
+                .PREADY  (uart_pready),
+                .PSLVERR (uart_pslverr),
+                .rx_i    (uart_rx_i),
+                .tx_o    (uart_tx_o),
+                .event_o (uart_event_o)
+              );
 
   // Connect arbiter output to external APB interface or UART
   assign i_cpu_apb_paddr   = arbiter_out_if.paddr;
@@ -293,7 +307,7 @@ module top_with_ram_sim #(
   assign i_cpu_apb_penable = arbiter_out_if.penable;
   assign i_cpu_apb_pwrite  = arbiter_out_if.pwrite;
   assign i_cpu_apb_pwdata  = arbiter_out_if.pwdata;
-  
+
   // Mux response from UART or external APB
   assign arbiter_out_if.pready  = uart_psel ? uart_pready  : o_cpu_apb_pready;
   assign arbiter_out_if.prdata  = uart_psel ? uart_prdata  : o_cpu_apb_prdata;
@@ -303,41 +317,55 @@ module top_with_ram_sim #(
   //  IMEM APB Master Logic (Debug ROM Access)
   // =================================================================
   typedef enum logic [1:0] {
-    IMEM_IDLE,
-    IMEM_SETUP,
-    IMEM_ACCESS
-  } imem_apb_state_t;
+            IMEM_IDLE,
+            IMEM_SETUP,
+            IMEM_ACCESS
+          } imem_apb_state_t;
   imem_apb_state_t imem_apb_state, imem_apb_next_state;
 
   logic [          31:0] imem_apb_addr_reg;
   logic [ADDR_WIDTH-1:0] imem_transaction_addr;
 
-  always_ff @(posedge clk or negedge reset_n) begin
-    if (!reset_n) begin
+  always_ff @(posedge clk or negedge reset_n)
+  begin
+    if (!reset_n)
+    begin
       imem_apb_state        <= IMEM_IDLE;
       imem_apb_addr_reg     <= '0;
       imem_transaction_addr <= '0;
-    end else begin
+    end
+    else
+    begin
       imem_apb_state <= imem_apb_next_state;
-      if (imem_apb_state == IMEM_IDLE && cpu_imem_rready && is_debug_rom_fetch) begin
+      if (imem_apb_state == IMEM_IDLE && cpu_imem_rready && is_debug_rom_fetch)
+      begin
         imem_apb_addr_reg     <= imem_addr;
         imem_transaction_addr <= imem_addr[ADDR_WIDTH-1:0];
       end
     end
   end
 
-  always_comb begin
+  always_comb
+  begin
     imem_apb_next_state = imem_apb_state;
     case (imem_apb_state)
-      IMEM_IDLE:   if (cpu_imem_rready && is_debug_rom_fetch) imem_apb_next_state = IMEM_SETUP;
-      IMEM_SETUP:  imem_apb_next_state = IMEM_ACCESS;
-      IMEM_ACCESS: if (imem_apb_if.pready) imem_apb_next_state = IMEM_IDLE;
-      default:     imem_apb_next_state = IMEM_IDLE;
+      IMEM_IDLE:
+        if (cpu_imem_rready && is_debug_rom_fetch)
+          imem_apb_next_state = IMEM_SETUP;
+      IMEM_SETUP:
+        imem_apb_next_state = IMEM_ACCESS;
+      IMEM_ACCESS:
+        if (imem_apb_if.pready)
+          imem_apb_next_state = IMEM_IDLE;
+      default:
+        imem_apb_next_state = IMEM_IDLE;
     endcase
   end
 
-  always_ff @(posedge clk or negedge reset_n) begin
-    if (!reset_n) begin
+  always_ff @(posedge clk or negedge reset_n)
+  begin
+    if (!reset_n)
+    begin
       imem_apb_if.paddr   <= '0;
       imem_apb_if.psel    <= 1'b0;
       imem_apb_if.penable <= 1'b0;
@@ -345,32 +373,40 @@ module top_with_ram_sim #(
       imem_apb_if.pwdata  <= '0;
       imem_apb_if.pstrb   <= '0;
       imem_apb_if.pprot   <= '0;
-    end else begin
+    end
+    else
+    begin
       case (imem_apb_state)
-        IMEM_IDLE: begin
+        IMEM_IDLE:
+        begin
           imem_apb_if.psel    <= 1'b0;
           imem_apb_if.penable <= 1'b0;
-          if (cpu_imem_rready && is_debug_rom_fetch) begin
+          if (cpu_imem_rready && is_debug_rom_fetch)
+          begin
             imem_apb_if.psel   <= 1'b1;
             imem_apb_if.paddr  <= imem_addr[ADDR_WIDTH-1:0];
             imem_apb_if.pwrite <= 1'b0;
           end
         end
-        IMEM_SETUP: begin
+        IMEM_SETUP:
+        begin
           imem_apb_if.paddr   <= imem_transaction_addr;
           imem_apb_if.psel    <= 1'b1;
           imem_apb_if.penable <= 1'b1;
         end
-        IMEM_ACCESS: begin
+        IMEM_ACCESS:
+        begin
           imem_apb_if.paddr   <= imem_transaction_addr;
           imem_apb_if.psel    <= 1'b1;
           imem_apb_if.penable <= 1'b1;
-          if (imem_apb_if.pready) begin
+          if (imem_apb_if.pready)
+          begin
             imem_apb_if.psel    <= 1'b0;
             imem_apb_if.penable <= 1'b0;
           end
         end
-        default: begin
+        default:
+        begin
           imem_apb_if.psel    <= 1'b0;
           imem_apb_if.penable <= 1'b0;
         end
@@ -382,10 +418,10 @@ module top_with_ram_sim #(
   //  DMEM APB Master Logic (Debug Module Access)
   // =================================================================
   typedef enum logic [1:0] {
-    DMEM_IDLE,
-    DMEM_SETUP,
-    DMEM_ACCESS
-  } dmem_apb_state_t;
+            DMEM_IDLE,
+            DMEM_SETUP,
+            DMEM_ACCESS
+          } dmem_apb_state_t;
   dmem_apb_state_t dmem_apb_state, dmem_apb_next_state;
 
   logic [          31:0] dmem_apb_addr_reg;
@@ -395,8 +431,10 @@ module top_with_ram_sim #(
   logic [          31:0] dmem_transaction_wdata;
   logic                  dmem_transaction_write;
 
-  always_ff @(posedge clk or negedge reset_n) begin
-    if (!reset_n) begin
+  always_ff @(posedge clk or negedge reset_n)
+  begin
+    if (!reset_n)
+    begin
       dmem_apb_state         <= DMEM_IDLE;
       dmem_apb_addr_reg      <= '0;
       dmem_apb_wdata_reg     <= '0;
@@ -404,9 +442,12 @@ module top_with_ram_sim #(
       dmem_transaction_addr  <= '0;
       dmem_transaction_wdata <= '0;
       dmem_transaction_write <= 1'b0;
-    end else begin
+    end
+    else
+    begin
       dmem_apb_state <= dmem_apb_next_state;
-      if (dmem_apb_state == DMEM_IDLE && (is_dm_write || is_dm_read)) begin
+      if (dmem_apb_state == DMEM_IDLE && (is_dm_write || is_dm_read))
+      begin
         dmem_apb_addr_reg      <= dmem_addr;
         dmem_apb_wdata_reg     <= dmem_wdata;
         dmem_apb_write_reg     <= is_dm_write;
@@ -417,18 +458,27 @@ module top_with_ram_sim #(
     end
   end
 
-  always_comb begin
+  always_comb
+  begin
     dmem_apb_next_state = dmem_apb_state;
     case (dmem_apb_state)
-      DMEM_IDLE:   if (is_dm_write || is_dm_read) dmem_apb_next_state = DMEM_SETUP;
-      DMEM_SETUP:  dmem_apb_next_state = DMEM_ACCESS;
-      DMEM_ACCESS: if (dmem_apb_if.pready) dmem_apb_next_state = DMEM_IDLE;
-      default:     dmem_apb_next_state = DMEM_IDLE;
+      DMEM_IDLE:
+        if (is_dm_write || is_dm_read)
+          dmem_apb_next_state = DMEM_SETUP;
+      DMEM_SETUP:
+        dmem_apb_next_state = DMEM_ACCESS;
+      DMEM_ACCESS:
+        if (dmem_apb_if.pready)
+          dmem_apb_next_state = DMEM_IDLE;
+      default:
+        dmem_apb_next_state = DMEM_IDLE;
     endcase
   end
 
-  always_ff @(posedge clk or negedge reset_n) begin
-    if (!reset_n) begin
+  always_ff @(posedge clk or negedge reset_n)
+  begin
+    if (!reset_n)
+    begin
       dmem_apb_if.paddr   <= '0;
       dmem_apb_if.psel    <= 1'b0;
       dmem_apb_if.penable <= 1'b0;
@@ -436,37 +486,45 @@ module top_with_ram_sim #(
       dmem_apb_if.pwdata  <= '0;
       dmem_apb_if.pstrb   <= 4'hF;
       dmem_apb_if.pprot   <= '0;
-    end else begin
+    end
+    else
+    begin
       case (dmem_apb_state)
-        DMEM_IDLE: begin
+        DMEM_IDLE:
+        begin
           dmem_apb_if.psel    <= 1'b0;
           dmem_apb_if.penable <= 1'b0;
-          if (is_dm_write || is_dm_read) begin
+          if (is_dm_write || is_dm_read)
+          begin
             dmem_apb_if.psel   <= 1'b1;
             dmem_apb_if.paddr  <= dmem_addr[ADDR_WIDTH-1:0];
             dmem_apb_if.pwrite <= is_dm_write;
             dmem_apb_if.pwdata <= dmem_wdata;
           end
         end
-        DMEM_SETUP: begin
+        DMEM_SETUP:
+        begin
           dmem_apb_if.paddr   <= dmem_transaction_addr;
           dmem_apb_if.pwrite  <= dmem_transaction_write;
           dmem_apb_if.pwdata  <= dmem_transaction_wdata;
           dmem_apb_if.psel    <= 1'b1;
           dmem_apb_if.penable <= 1'b1;
         end
-        DMEM_ACCESS: begin
+        DMEM_ACCESS:
+        begin
           dmem_apb_if.paddr   <= dmem_transaction_addr;
           dmem_apb_if.pwrite  <= dmem_transaction_write;
           dmem_apb_if.pwdata  <= dmem_transaction_wdata;
           dmem_apb_if.psel    <= 1'b1;
           dmem_apb_if.penable <= 1'b1;
-          if (dmem_apb_if.pready) begin
+          if (dmem_apb_if.pready)
+          begin
             dmem_apb_if.psel    <= 1'b0;
             dmem_apb_if.penable <= 1'b0;
           end
         end
-        default: begin
+        default:
+        begin
           dmem_apb_if.psel    <= 1'b0;
           dmem_apb_if.penable <= 1'b0;
         end
@@ -487,18 +545,24 @@ module top_with_ram_sim #(
   logic dmem_wready_clint;
 
   // IMEM valid signals
-  always_ff @(posedge clk or negedge reset_n) begin
-    if (!reset_n) imem_rvalid_normal <= 1'b0;
-    else imem_rvalid_normal <= cpu_imem_rready && !is_debug_rom_fetch;
+  always_ff @(posedge clk or negedge reset_n)
+  begin
+    if (!reset_n)
+      imem_rvalid_normal <= 1'b0;
+    else
+      imem_rvalid_normal <= cpu_imem_rready && !is_debug_rom_fetch;
   end
 
   assign imem_rvalid_debug = (imem_apb_state == IMEM_ACCESS && imem_apb_if.pready);
   assign cpu_imem_rvalid   = imem_rvalid_normal || imem_rvalid_debug;
 
   // DMEM read valid signals
-  always_ff @(posedge clk or negedge reset_n) begin
-    if (!reset_n) dmem_rvalid_normal <= 1'b0;
-    else dmem_rvalid_normal <= cpu_dmem_rready && !is_debug_data_access && !is_clint_access;
+  always_ff @(posedge clk or negedge reset_n)
+  begin
+    if (!reset_n)
+      dmem_rvalid_normal <= 1'b0;
+    else
+      dmem_rvalid_normal <= cpu_dmem_rready && !is_debug_data_access && !is_clint_access;
   end
 
   assign dmem_rvalid_debug = (dmem_apb_state == DMEM_ACCESS && dmem_apb_if.pready && !dmem_transaction_write);
@@ -517,11 +581,15 @@ module top_with_ram_sim #(
   logic [31:0] imem_apb_resp_reg;
   logic [31:0] dmem_apb_resp_reg;
 
-  always_ff @(posedge clk or negedge reset_n) begin
-    if (!reset_n) begin
+  always_ff @(posedge clk or negedge reset_n)
+  begin
+    if (!reset_n)
+    begin
       imem_apb_resp_reg <= 32'h0;
       dmem_apb_resp_reg <= 32'h0;
-    end else begin
+    end
+    else
+    begin
       if (imem_apb_state == IMEM_ACCESS && imem_apb_if.pready)
         imem_apb_resp_reg <= imem_apb_if.prdata;
       if (dmem_apb_state == DMEM_ACCESS && dmem_apb_if.pready && !dmem_transaction_write)
@@ -541,18 +609,18 @@ module top_with_ram_sim #(
   assign imem_bram_addr = imem_addr[13:2];  // Word address
 
   imem_gowin_bram #(
-      .DEPTH     (IMEM_DEPTH),
-      .ADDR_WIDTH(12)
-  ) imem_bram_inst (
-      .clk    (clk),
-      .reset_n(reset_n),
-      .wr_en  (init_wen && (init_addr[15:14] == 2'b00)),  // Map to lower 16KB
-      .wr_addr(init_addr[13:2]),
-      .wr_data(init_data),
-      .rd_en  (cpu_imem_rready && !is_debug_rom_fetch),
-      .rd_addr(imem_bram_addr),
-      .rd_data(imem_bram_dout)
-  );
+                    .DEPTH     (IMEM_DEPTH),
+                    .ADDR_WIDTH(12)
+                  ) imem_bram_inst (
+                    .clk    (clk),
+                    .reset_n(reset_n),
+                    .wr_en  (init_wen && (init_addr[15:14] == 2'b00)),  // Map to lower 16KB
+                    .wr_addr(init_addr[13:2]),
+                    .wr_data(init_data),
+                    .rd_en  (cpu_imem_rready && !is_debug_rom_fetch),
+                    .rd_addr(imem_bram_addr),
+                    .rd_data(imem_bram_dout)
+                  );
 
   assign imem_rdata = is_debug_rom_fetch ? imem_apb_data : imem_bram_dout;
 
@@ -563,20 +631,20 @@ module top_with_ram_sim #(
   assign dmem_bram_we   = (cpu_dmem_wvalid != 2'b00) && !is_dm_write && !is_clint_access && cpu_dmem_wready;
 
   dmem_gowin_bram #(
-      .DEPTH     (DMEM_DEPTH),
-      .ADDR_WIDTH(12)
-  ) dmem_bram_inst (
-      .clk      (clk),
-      .reset_n  (reset_n),
-      .wr_en    (dmem_bram_we),
-      .rd_en    (cpu_dmem_rready && !is_debug_data_access && !is_clint_access),
-      .addr     (dmem_bram_addr),
-      .wr_data  (dmem_wdata),
-      .rd_data  (dmem_bram_dout),
-      .init_wen (init_wen && (init_addr[15:14] == 2'b00)),
-      .init_addr(init_addr[13:2]),
-      .init_data(init_data)
-  );
+                    .DEPTH     (DMEM_DEPTH),
+                    .ADDR_WIDTH(12)
+                  ) dmem_bram_inst (
+                    .clk      (clk),
+                    .reset_n  (reset_n),
+                    .wr_en    (dmem_bram_we),
+                    .rd_en    (cpu_dmem_rready && !is_debug_data_access && !is_clint_access),
+                    .addr     (dmem_bram_addr),
+                    .wr_data  (dmem_wdata),
+                    .rd_data  (dmem_bram_dout),
+                    .init_wen (init_wen && (init_addr[15:14] == 2'b00)),
+                    .init_addr(init_addr[13:2]),
+                    .init_data(init_data)
+                  );
 
   assign dmem_rdata = is_clint_access ? clint_prdata :
          (is_debug_data_access ? dmem_apb_data : dmem_bram_dout);
@@ -584,10 +652,14 @@ module top_with_ram_sim #(
   // Monitor tohost for RISC-V test support
   // TOHOST_ADDR is now a module parameter (see module declaration)
 
-  always_ff @(posedge clk or negedge reset_n) begin
-    if (!reset_n) begin
+  always_ff @(posedge clk or negedge reset_n)
+  begin
+    if (!reset_n)
+    begin
       tohost <= 32'h0;
-    end else if ((cpu_dmem_wvalid != 2'b00) && (dmem_addr == TOHOST_ADDR)) begin
+    end
+    else if ((cpu_dmem_wvalid != 2'b00) && (dmem_addr == TOHOST_ADDR))
+    begin
       tohost <= dmem_wdata;
     end
   end
@@ -596,8 +668,10 @@ module top_with_ram_sim #(
   logic cpu_reset_n;
   assign cpu_reset_n = reset_n & ~i_resetreq & ~init_in_progress;
 
-  always_ff @(posedge clk) begin
-    if (HART_ID == 1) begin
+  always_ff @(posedge clk)
+  begin
+    if (HART_ID == 1)
+    begin
       if (cpu_reset_n && $past(!cpu_reset_n))
         $display(
             "[Hart 1] CPU reset released at time %0t (reset_n=%b, resetreq=%b, init_in_progress=%b)",
@@ -605,7 +679,7 @@ module top_with_ram_sim #(
             reset_n,
             i_resetreq,
             init_in_progress
-        );
+          );
     end
   end
 
@@ -613,44 +687,44 @@ module top_with_ram_sim #(
   //  Core Instantiation
   // =================================================================
   core #(
-      .START_ADDR(START_ADDR),
-      .HART_ID   (HART_ID)
-  ) cpu (
-      .clk    (clk),
-      .reset_n(cpu_reset_n),
+         .START_ADDR(START_ADDR),
+         .HART_ID   (HART_ID)
+       ) cpu (
+         .clk    (clk),
+         .reset_n(cpu_reset_n),
 
-      // DMEM Write Interface
-      .dmem_wready(cpu_dmem_wready),
-      .dmem_wvalid(cpu_dmem_wvalid),
-      .dmem_wdata (dmem_wdata),
-      .dmem_addr  (dmem_addr),
+         // DMEM Write Interface
+         .dmem_wready(cpu_dmem_wready),
+         .dmem_wvalid(cpu_dmem_wvalid),
+         .dmem_wdata (dmem_wdata),
+         .dmem_addr  (dmem_addr),
 
-      // DMEM Read Interface
-      .dmem_rvalid(cpu_dmem_rvalid),
-      .dmem_rready(cpu_dmem_rready),
-      .dmem_rdata (dmem_rdata),
+         // DMEM Read Interface
+         .dmem_rvalid(cpu_dmem_rvalid),
+         .dmem_rready(cpu_dmem_rready),
+         .dmem_rdata (dmem_rdata),
 
-      // IMEM Read Interface
-      .imem_rready(cpu_imem_rready),
-      .imem_rvalid(cpu_imem_rvalid),
-      .imem_rdata (imem_rdata),
-      .imem_addr  (imem_addr),
+         // IMEM Read Interface
+         .imem_rready(cpu_imem_rready),
+         .imem_rvalid(cpu_imem_rvalid),
+         .imem_rdata (imem_rdata),
+         .imem_addr  (imem_addr),
 
-      .exit(exit),
+         .exit(exit),
 
-      // Interrupt inputs
-      .m_external_interrupt(1'b0),
-      .m_timer_interrupt   (m_timer_interrupt),
-      .m_software_interrupt(1'b0),
+         // Interrupt inputs
+         .m_external_interrupt(1'b0),
+         .m_timer_interrupt   (m_timer_interrupt),
+         .m_software_interrupt(1'b0),
 
-      // Debug interface
-      .i_haltreq   (i_haltreq),
-      .debug_mode_o(debug_mode),
+         // Debug interface
+         .i_haltreq   (i_haltreq),
+         .debug_mode_o(debug_mode),
 
-      // External triggers
-      .i_external_trigger(i_external_trigger),
-      .o_external_trigger(o_external_trigger)
-  );
+         // External triggers
+         .i_external_trigger(i_external_trigger),
+         .o_external_trigger(o_external_trigger)
+       );
 
   // =================================================================
   //  Output Assignments
@@ -680,7 +754,7 @@ endmodule
 module imem_gowin_bram #(
     parameter DEPTH      = 4096,
     parameter ADDR_WIDTH = 12
-) (
+  ) (
     input  logic                  clk,
     input  logic                  reset_n,
     // Write port (Port A)
@@ -691,29 +765,35 @@ module imem_gowin_bram #(
     input  logic                  rd_en,
     input  logic [ADDR_WIDTH-1:0] rd_addr,
     output logic [          31:0] rd_data
-);
+  );
 
   // Inferred BRAM with proper attributes for Gowin
   logic [31:0] mem         [DEPTH-1:0];
   logic [31:0] rd_data_reg;
 
   // Initialize to NOPs
-  initial begin
-    for (int i = 0; i < DEPTH; i++) begin
+  initial
+  begin
+    for (int i = 0; i < DEPTH; i++)
+    begin
       mem[i] = 32'h00000013;  // NOP
     end
   end
 
   // Write port
-  always_ff @(posedge clk) begin
-    if (wr_en) begin
+  always_ff @(posedge clk)
+  begin
+    if (wr_en)
+    begin
       mem[wr_addr] <= wr_data;
     end
   end
 
   // Read port with pipeline register
-  always_ff @(posedge clk) begin
-    if (rd_en) begin
+  always_ff @(posedge clk)
+  begin
+    if (rd_en)
+    begin
       rd_data_reg <= mem[rd_addr];
     end
   end
@@ -734,7 +814,7 @@ endmodule
 module dmem_gowin_bram #(
     parameter DEPTH      = 4096,
     parameter ADDR_WIDTH = 12
-) (
+  ) (
     input  logic                  clk,
     input  logic                  reset_n,
     // Port A: Main data access
@@ -747,35 +827,43 @@ module dmem_gowin_bram #(
     input  logic                  init_wen,
     input  logic [ADDR_WIDTH-1:0] init_addr,
     input  logic [          31:0] init_data
-);
+  );
 
   // Inferred BRAM with proper attributes for Gowin
   logic [31:0] mem         [DEPTH-1:0];
   logic [31:0] rd_data_reg;
 
   // Initialize to NOPs
-  initial begin
-    for (int i = 0; i < DEPTH; i++) begin
+  initial
+  begin
+    for (int i = 0; i < DEPTH; i++)
+    begin
       mem[i] = 32'h00000013;  // NOP
     end
   end
 
   // Port A: Read/Write
-  always_ff @(posedge clk) begin
-    if (wr_en) begin
+  always_ff @(posedge clk)
+  begin
+    if (wr_en)
+    begin
       mem[addr] <= wr_data;
     end
   end
 
-  always_ff @(posedge clk) begin
-    if (rd_en) begin
+  always_ff @(posedge clk)
+  begin
+    if (rd_en)
+    begin
       rd_data_reg <= mem[addr];
     end
   end
 
   // Port B: Initialization write
-  always_ff @(posedge clk) begin
-    if (init_wen) begin
+  always_ff @(posedge clk)
+  begin
+    if (init_wen)
+    begin
       mem[init_addr] <= init_data;
     end
   end
