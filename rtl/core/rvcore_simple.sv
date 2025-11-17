@@ -29,10 +29,11 @@ module core #(
     output logic        debug_mode_o,          // Debug mode status output
     // External trigger inputs (for Sdtrig extension - Type 7)
     // Spec allows up to 16 inputs, using 4 for simplicity
-    input  logic [3:0]  i_external_trigger,    // External trigger inputs [0:3]
+    input  logic [ 3:0] i_external_trigger,    // External trigger inputs [0:3]
     // External trigger outputs (for actions 8/9)
     // Action 8: chain 0 output, Action 9: chain 1 output
-    output logic [1:0]  o_external_trigger     // [0]=action8/chain0, [1]=action9/chain1
+    output logic [ 1:0] o_external_trigger,    // [0]=action8/chain0, [1]=action9/chain1
+    output logic        gp
   );
   enum logic [2:0] {
          PROC,
@@ -58,7 +59,7 @@ module core #(
       // (both loads and stores, including SB/SH that need RMW)
       if (proc_state == IMEM_DONE && (wb_sel == `WB_MEM || mem_wen != `MEN_X))
       begin
-        mem_inst <= inst;
+        mem_inst       <= inst;
         mem_addr_saved <= alu_out;
       end
     end
@@ -248,61 +249,61 @@ module core #(
   parameter int NUM_TRIGGERS = 4;  // 4 hardware triggers
 
   // Trigger CSR registers
-  logic [             1:0]       tselect;   // 2 bits for 4 triggers
-  logic [NUM_TRIGGERS-1:0][31:0] tdata1;    // Trigger type and config
-  logic [NUM_TRIGGERS-1:0][31:0] tdata2;    // Trigger data (address/count)
-  logic [NUM_TRIGGERS-1:0][31:0] tdata3;    // Additional trigger data
-  logic [            31:0]       tinfo;     // Trigger info (types supported)
+  logic [             1:0]       tselect;  // 2 bits for 4 triggers
+  logic [NUM_TRIGGERS-1:0][31:0] tdata1;  // Trigger type and config
+  logic [NUM_TRIGGERS-1:0][31:0] tdata2;  // Trigger data (address/count)
+  logic [NUM_TRIGGERS-1:0][31:0] tdata3;  // Additional trigger data
+  logic [            31:0]       tinfo;  // Trigger info (types supported)
   logic [            31:0]       tcontrol;  // Trigger control (mte, mpte)
   logic [            31:0]       mcontext;  // M-mode context
 
   // Trigger match signals for all types
-  logic [NUM_TRIGGERS-1:0]       trigger_mcontrol_match;   // Type 2
-  logic [NUM_TRIGGERS-1:0]       trigger_icount_match;     // Type 3
-  logic [NUM_TRIGGERS-1:0]       trigger_itrigger_match;   // Type 4
-  logic [NUM_TRIGGERS-1:0]       trigger_etrigger_match;   // Type 5
+  logic [NUM_TRIGGERS-1:0]       trigger_mcontrol_match;  // Type 2
+  logic [NUM_TRIGGERS-1:0]       trigger_icount_match;  // Type 3
+  logic [NUM_TRIGGERS-1:0]       trigger_itrigger_match;  // Type 4
+  logic [NUM_TRIGGERS-1:0]       trigger_etrigger_match;  // Type 5
   logic [NUM_TRIGGERS-1:0]       trigger_mcontrol6_match;  // Type 6
-  logic [NUM_TRIGGERS-1:0]       trigger_tmexttrigger_match; // Type 7
+  logic [NUM_TRIGGERS-1:0]       trigger_tmexttrigger_match;  // Type 7
 
   // Trigger action outputs
-  logic [NUM_TRIGGERS-1:0]       trigger_action_exception; // Action 0
-  logic [NUM_TRIGGERS-1:0]       trigger_action_debug;     // Action 1
-  logic [NUM_TRIGGERS-1:0]       trigger_action_ext0;      // Action 8
-  logic [NUM_TRIGGERS-1:0]       trigger_action_ext1;      // Action 9
+  logic [NUM_TRIGGERS-1:0]       trigger_action_exception;  // Action 0
+  logic [NUM_TRIGGERS-1:0]       trigger_action_debug;  // Action 1
+  logic [NUM_TRIGGERS-1:0]       trigger_action_ext0;  // Action 8
+  logic [NUM_TRIGGERS-1:0]       trigger_action_ext1;  // Action 9
 
   logic                          trigger_fire;
-  logic                          trigger_exception_req;    // Breakpoint exc
+  logic                          trigger_exception_req;  // Breakpoint exc
 
   // Instruction counter for icount trigger (type 3)
   logic [NUM_TRIGGERS-1:0][31:0] icount_counter;
   logic [NUM_TRIGGERS-1:0]       icount_pending;
 
   // Memory access tracking for triggers
-  logic mem_load_req;   // Load request in current cycle
-  logic mem_store_req;  // Store request in current cycle
-  logic [31:0] mem_access_addr;  // Memory access address
+  logic                          mem_load_req;  // Load request in current cycle
+  logic                          mem_store_req;  // Store request in current cycle
+  logic [            31:0]       mem_access_addr;  // Memory access address
 
   // Trap/interrupt tracking for triggers
-  logic trap_taken;     // Exception or interrupt taken this cycle
-  logic interrupt_trap; // Trap is interrupt (vs exception)
-  logic [31:0] trap_cause; // Trap cause value
+  logic                          trap_taken;  // Exception or interrupt taken this cycle
+  logic                          interrupt_trap;  // Trap is interrupt (vs exception)
+  logic [            31:0]       trap_cause;  // Trap cause value
 
   // Misaligned access detection
-  logic misaligned_load;   // Load address misaligned
-  logic misaligned_store;  // Store/AMO address misaligned
-  logic misaligned_exception; // Combined misaligned exception flag
+  logic                          misaligned_load;  // Load address misaligned
+  logic                          misaligned_store;  // Store/AMO address misaligned
+  logic                          misaligned_exception;  // Combined misaligned exception flag
 
   // tcontrol fields (trigger control)
-  logic tcontrol_mte;   // M-mode trigger enable (bit 3)
-  logic tcontrol_mpte;  // M-mode previous trigger enable (bit 7)
+  logic                          tcontrol_mte;  // M-mode trigger enable (bit 3)
+  logic                          tcontrol_mpte;  // M-mode previous trigger enable (bit 7)
 
-  assign tcontrol_mte = tcontrol[3];
+  assign tcontrol_mte  = tcontrol[3];
   assign tcontrol_mpte = tcontrol[7];
 
   // tinfo: report which trigger types are supported
   // bit position N = 1 means type N is supported
   // We support types 2,3,4,5,6,7
-  assign tinfo = 32'b0000_0000_0000_0000_0000_0001_1111_1100;
+  assign tinfo         = 32'b0000_0000_0000_0000_0000_0001_1111_1100;
 
   // ==========================================================================
   // Type 2: mcontrol (Legacy Address/Data Match Trigger)
@@ -310,24 +311,29 @@ module core #(
   // tdata1 format: [31:28]=type(2), [27]=dmode, [20]=hit, [12]=action,
   //                [11]=chain, [7:5]=match, [4:3]=size, [2]=execute,
   //                [1]=store, [0]=load
+
+  // Pre-declare intermediate signals to improve synthesis
+  logic [NUM_TRIGGERS-1:0] mcontrol_is_type2;
+  logic [NUM_TRIGGERS-1:0] mcontrol_is_execute;
+  logic [NUM_TRIGGERS-1:0] mcontrol_is_load;
+  logic [NUM_TRIGGERS-1:0] mcontrol_is_store;
+  logic mcontrol_trigger_enabled;
+
   always_comb
   begin
+    mcontrol_trigger_enabled = tcontrol_mte && !debug_mode;
+
     for (int i = 0; i < NUM_TRIGGERS; i++)
     begin
-      logic is_type2, is_execute, is_load, is_store;
-      logic addr_match, trigger_enabled;
+      mcontrol_is_type2[i] = (tdata1[i][31:28] == 4'd2);
+      mcontrol_is_execute[i] = tdata1[i][2];
+      mcontrol_is_store[i] = tdata1[i][1];
+      mcontrol_is_load[i] = tdata1[i][0];
 
-      is_type2 = (tdata1[i][31:28] == 4'd2);
-      is_execute = tdata1[i][2];
-      is_store = tdata1[i][1];
-      is_load = tdata1[i][0];
-      addr_match = (pc == tdata2[i]) || (mem_access_addr == tdata2[i]);
-      trigger_enabled = tcontrol_mte && !debug_mode;
-
-      trigger_mcontrol_match[i] = is_type2 && trigger_enabled && (
-                              (is_execute && (pc == tdata2[i])) ||
-                              (is_load && mem_load_req && (mem_access_addr == tdata2[i])) ||
-                              (is_store && mem_store_req && (mem_access_addr == tdata2[i]))
+      trigger_mcontrol_match[i] = mcontrol_is_type2[i] && mcontrol_trigger_enabled && (
+                              (mcontrol_is_execute[i] && (pc == tdata2[i])) ||
+                              (mcontrol_is_load[i] && mem_load_req && (mem_access_addr == tdata2[i])) ||
+                              (mcontrol_is_store[i] && mem_store_req && (mem_access_addr == tdata2[i]))
                             );
     end
   end
@@ -337,20 +343,21 @@ module core #(
   // ==========================================================================
   // tdata1 format: [31:28]=type(3), [27]=dmode, [25]=hit, [23:10]=count,
   //                [9]=m (M-mode), [6:5]=action, [4]=u, [3]=s, [0]=pending
+
+  logic [NUM_TRIGGERS-1:0] icount_is_type3;
+  logic [NUM_TRIGGERS-1:0] icount_m_mode_match;
+  logic [NUM_TRIGGERS-1:0] icount_count_enabled;
+
   always_comb
   begin
     for (int i = 0; i < NUM_TRIGGERS; i++)
     begin
-      logic is_type3, count_enabled, m_mode_match;
-      logic [13:0] count_value;
-
-      is_type3 = (tdata1[i][31:28] == 4'd3);
-      count_value = tdata1[i][23:10];
-      m_mode_match = tdata1[i][9];  // M-mode bit
-      count_enabled = tcontrol_mte && !debug_mode && m_mode_match;
+      icount_is_type3[i] = (tdata1[i][31:28] == 4'd3);
+      icount_m_mode_match[i] = tdata1[i][9];  // M-mode bit
+      icount_count_enabled[i] = tcontrol_mte && !debug_mode && icount_m_mode_match[i];
 
       // Fire when counter reaches 0 and instruction retires
-      trigger_icount_match[i] = is_type3 && count_enabled &&
+      trigger_icount_match[i] = icount_is_type3[i] && icount_count_enabled[i] &&
                           (icount_counter[i][13:0] == 14'd0) &&
                           instruction_retired;
     end
@@ -361,19 +368,23 @@ module core #(
   // ==========================================================================
   // tdata1 format: [31:28]=type(4), [27]=dmode, [26]=hit, [25]=vs,
   //                [24]=vu, [9]=m, [7:6]=action, [3]=s, [2]=u, [1]=nmi
+
+  logic [NUM_TRIGGERS-1:0] itrigger_is_type4;
+  logic [NUM_TRIGGERS-1:0] itrigger_m_mode_match;
+  logic itrigger_trigger_enabled;
+
   always_comb
   begin
+    itrigger_trigger_enabled = tcontrol_mte && !debug_mode;
+
     for (int i = 0; i < NUM_TRIGGERS; i++)
     begin
-      logic is_type4, m_mode_match, trigger_enabled;
-
-      is_type4 = (tdata1[i][31:28] == 4'd4);
-      m_mode_match = tdata1[i][9];  // M-mode bit
-      trigger_enabled = tcontrol_mte && !debug_mode;
+      itrigger_is_type4[i] = (tdata1[i][31:28] == 4'd4);
+      itrigger_m_mode_match[i] = tdata1[i][9];  // M-mode bit
 
       // Fire when interrupt trap is taken
-      trigger_itrigger_match[i] = is_type4 && trigger_enabled &&
-                            m_mode_match && trap_taken &&
+      trigger_itrigger_match[i] = itrigger_is_type4[i] && itrigger_trigger_enabled &&
+                            itrigger_m_mode_match[i] && trap_taken &&
                             interrupt_trap;
     end
   end
@@ -383,19 +394,23 @@ module core #(
   // ==========================================================================
   // tdata1 format: [31:28]=type(5), [27]=dmode, [26]=hit, [25]=vs,
   //                [24]=vu, [9]=m, [7:6]=action, [3]=s, [2]=u
+
+  logic [NUM_TRIGGERS-1:0] etrigger_is_type5;
+  logic [NUM_TRIGGERS-1:0] etrigger_m_mode_match;
+  logic etrigger_trigger_enabled;
+
   always_comb
   begin
+    etrigger_trigger_enabled = tcontrol_mte && !debug_mode;
+
     for (int i = 0; i < NUM_TRIGGERS; i++)
     begin
-      logic is_type5, m_mode_match, trigger_enabled;
-
-      is_type5 = (tdata1[i][31:28] == 4'd5);
-      m_mode_match = tdata1[i][9];  // M-mode bit
-      trigger_enabled = tcontrol_mte && !debug_mode;
+      etrigger_is_type5[i] = (tdata1[i][31:28] == 4'd5);
+      etrigger_m_mode_match[i] = tdata1[i][9];  // M-mode bit
 
       // Fire when exception trap is taken
-      trigger_etrigger_match[i] = is_type5 && trigger_enabled &&
-                            m_mode_match && trap_taken &&
+      trigger_etrigger_match[i] = etrigger_is_type5[i] && etrigger_trigger_enabled &&
+                            etrigger_m_mode_match[i] && trap_taken &&
                             !interrupt_trap;
     end
   end
@@ -407,28 +422,31 @@ module core #(
   //                [21]=hit1, [20]=hit0, [16:12]=select, [11]=timing,
   //                [10:7]=size, [6:5]=action, [4]=chain, [3]=match,
   //                [2]=m, [1]=s, [0]=u
+
+  logic [NUM_TRIGGERS-1:0] mcontrol6_is_type6;
+  logic [NUM_TRIGGERS-1:0] mcontrol6_is_exec;
+  logic [NUM_TRIGGERS-1:0] mcontrol6_is_load;
+  logic [NUM_TRIGGERS-1:0] mcontrol6_is_store;
+  logic [NUM_TRIGGERS-1:0] mcontrol6_m_mode_match;
+  logic [NUM_TRIGGERS-1:0] mcontrol6_trigger_enabled;
+
   always_comb
   begin
     for (int i = 0; i < NUM_TRIGGERS; i++)
     begin
-      logic is_type6, is_exec, is_load, is_store, m_mode_match;
-      logic addr_match, trigger_enabled;
-      logic [4:0] select_field;
-
-      is_type6 = (tdata1[i][31:28] == 4'd6);
-      select_field = tdata1[i][16:12];
-      m_mode_match = tdata1[i][2];  // M-mode bit
-      trigger_enabled = tcontrol_mte && !debug_mode && m_mode_match;
+      mcontrol6_is_type6[i] = (tdata1[i][31:28] == 4'd6);
+      mcontrol6_m_mode_match[i] = tdata1[i][2];  // M-mode bit
+      mcontrol6_trigger_enabled[i] = tcontrol_mte && !debug_mode && mcontrol6_m_mode_match[i];
 
       // Decode select field for load/store/execute
-      is_exec = (select_field == 5'd0);  // Execute only
-      is_load = (select_field == 5'd1);  // Load only
-      is_store = (select_field == 5'd2); // Store only
+      mcontrol6_is_exec[i] = (tdata1[i][16:12] == 5'd0);  // Execute only
+      mcontrol6_is_load[i] = (tdata1[i][16:12] == 5'd1);  // Load only
+      mcontrol6_is_store[i] = (tdata1[i][16:12] == 5'd2);  // Store only
 
-      trigger_mcontrol6_match[i] = is_type6 && trigger_enabled && (
-                               (is_exec && (pc == tdata2[i])) ||
-                               (is_load && mem_load_req && (mem_access_addr == tdata2[i])) ||
-                               (is_store && mem_store_req && (mem_access_addr == tdata2[i]))
+      trigger_mcontrol6_match[i] = mcontrol6_is_type6[i] && mcontrol6_trigger_enabled[i] && (
+                               (mcontrol6_is_exec[i] && (pc == tdata2[i])) ||
+                               (mcontrol6_is_load[i] && mem_load_req && (mem_access_addr == tdata2[i])) ||
+                               (mcontrol6_is_store[i] && mem_store_req && (mem_access_addr == tdata2[i]))
                              );
     end
   end
@@ -438,72 +456,76 @@ module core #(
   // ==========================================================================
   // tdata1 format: [31:28]=type(7), [27]=hit, [19:16]=select,
   //                [15:12]=action, [11]=intctl
+
+  logic [NUM_TRIGGERS-1:0] tmexttrigger_is_type7;
+  logic [NUM_TRIGGERS-1:0][3:0] tmexttrigger_ext_select;
+  logic tmexttrigger_trigger_enabled;
+
   always_comb
   begin
+    tmexttrigger_trigger_enabled = tcontrol_mte && !debug_mode;
+
     for (int i = 0; i < NUM_TRIGGERS; i++)
     begin
-      logic is_type7, trigger_enabled;
-      logic [3:0] ext_select;
+      tmexttrigger_is_type7[i] = (tdata1[i][31:28] == 4'd7);
+      tmexttrigger_ext_select[i] = tdata1[i][19:16];
 
-      is_type7 = (tdata1[i][31:28] == 4'd7);
-      ext_select = tdata1[i][19:16];
-      trigger_enabled = tcontrol_mte && !debug_mode;
-
-      trigger_tmexttrigger_match[i] = is_type7 && trigger_enabled &&
-                                (ext_select < 4) &&
-                                i_external_trigger[ext_select];
+      trigger_tmexttrigger_match[i] = tmexttrigger_is_type7[i] && tmexttrigger_trigger_enabled &&
+                                (tmexttrigger_ext_select[i] < 4) &&
+                                i_external_trigger[tmexttrigger_ext_select[i]];
     end
   end
 
   // ==========================================================================
   // Trigger Action Decoding
   // ==========================================================================
+
+  logic [NUM_TRIGGERS-1:0] trigger_matched;
+  logic [NUM_TRIGGERS-1:0][3:0] trigger_action;
+  logic [NUM_TRIGGERS-1:0][3:0] trigger_type;
+
   always_comb
   begin
     for (int i = 0; i < NUM_TRIGGERS; i++)
     begin
-      logic trigger_matched;
-      logic [3:0] action;
-      logic [3:0] trig_type;
-
       // Check if any trigger type matched
-      trigger_matched = trigger_mcontrol_match[i] |
-                      trigger_icount_match[i] |
-                      trigger_itrigger_match[i] |
-                      trigger_etrigger_match[i] |
-                      trigger_mcontrol6_match[i] |
-                      trigger_tmexttrigger_match[i];
+      trigger_matched[i] = trigger_mcontrol_match[i] |
+                     trigger_icount_match[i] |
+                     trigger_itrigger_match[i] |
+                     trigger_etrigger_match[i] |
+                     trigger_mcontrol6_match[i] |
+                     trigger_tmexttrigger_match[i];
 
-      trig_type = tdata1[i][31:28];
+      trigger_type[i] = tdata1[i][31:28];
 
       // Extract action field (position varies by type)
-      case (trig_type)
+      case (trigger_type[i])
         4'd2:
-          action = {3'd0, tdata1[i][12]};      // mcontrol
+          trigger_action[i] = {3'd0, tdata1[i][12]};  // mcontrol
         4'd3:
-          action = {2'd0, tdata1[i][6:5]};     // icount
+          trigger_action[i] = {2'd0, tdata1[i][6:5]};  // icount
         4'd4:
-          action = {2'd0, tdata1[i][7:6]};     // itrigger
+          trigger_action[i] = {2'd0, tdata1[i][7:6]};  // itrigger
         4'd5:
-          action = {2'd0, tdata1[i][7:6]};     // etrigger
+          trigger_action[i] = {2'd0, tdata1[i][7:6]};  // etrigger
         4'd6:
-          action = {2'd0, tdata1[i][6:5]};     // mcontrol6
+          trigger_action[i] = {2'd0, tdata1[i][6:5]};  // mcontrol6
         4'd7:
-          action = tdata1[i][15:12];           // tmexttrigger
+          trigger_action[i] = tdata1[i][15:12];  // tmexttrigger
         default:
-          action = 4'd0;
+          trigger_action[i] = 4'd0;
       endcase
 
       // Decode actions
-      trigger_action_exception[i] = trigger_matched && (action == 4'd0);
-      trigger_action_debug[i] = trigger_matched && (action == 4'd1);
-      trigger_action_ext0[i] = trigger_matched && (action == 4'd8);
-      trigger_action_ext1[i] = trigger_matched && (action == 4'd9);
+      trigger_action_exception[i] = trigger_matched[i] && (trigger_action[i] == 4'd0);
+      trigger_action_debug[i]     = trigger_matched[i] && (trigger_action[i] == 4'd1);
+      trigger_action_ext0[i]      = trigger_matched[i] && (trigger_action[i] == 4'd8);
+      trigger_action_ext1[i]      = trigger_matched[i] && (trigger_action[i] == 4'd9);
     end
   end
 
   // Combine trigger signals
-  assign trigger_fire = |trigger_action_debug;
+  assign trigger_fire          = |trigger_action_debug;
   assign trigger_exception_req = |trigger_action_exception;
   assign o_external_trigger[0] = |trigger_action_ext0;
   assign o_external_trigger[1] = |trigger_action_ext1;
@@ -1129,10 +1151,10 @@ module core #(
   // Non-aligned memory access is not supported, no exception generated
   always_comb
   begin
-    misaligned_load = 1'b0;
-    misaligned_store = 1'b0;
+    misaligned_load      = 1'b0;
+    misaligned_store     = 1'b0;
     misaligned_exception = 1'b0;
-    
+
     // Note: Misaligned access support is implementation-defined in RISC-V.
     // This core does not support misaligned access exception handling.
     // Tests requiring this feature (e.g., rv32ui-p-ma_data) are not supported.
@@ -1223,8 +1245,11 @@ module core #(
         // For SB/SH, data will be prepared after RMW read
         // mem_inst and mem_addr_saved are saved in state transition logic
       end
-      else if (proc_state == DMEM_READ && dmem_rvalid &&
-               (mem_wen != `MEN_X) && (`IS_SB(mem_inst) || `IS_SH(mem_inst)))
+      else if (proc_state == DMEM_READ && dmem_rvalid && (mem_wen != `MEN_X) && (
+                 `IS_SB(mem_inst)
+                 ||
+                 `IS_SH(mem_inst)
+               ))
       begin
         // Read-Modify-Write: Merge new data with read data
         if (`IS_SB(mem_inst))
@@ -1276,7 +1301,7 @@ module core #(
   begin
     if (!reset_n)
     begin
-      dmem_rready <= 1'b0;
+      dmem_rready   <= 1'b0;
       rmw_read_data <= 32'd0;
     end
     else
@@ -1410,17 +1435,16 @@ module core #(
   begin
     if (!reset_n)
     begin
-      pc <= START_ADDR;
-      mem_inst <= 32'd0;  // Initialize saved memory instruction
+      pc             <= START_ADDR;
+      mem_inst       <= 32'd0;  // Initialize saved memory instruction
       mem_addr_saved <= 32'd0;
       for (i = 0; i < 32; i = i + 1)
       begin
         register_file[i] <= 32'd0;
       end
-      for (j = 0; j < 4096; j = j + 1)
-      begin
-        csr_file[j] <= 32'd0;
-      end
+      // CSR file is not fully initialized - only specific CSRs are used
+      // This significantly improves synthesis time
+      // Individual CSRs are initialized below
 
       // Initialize M-Mode CSRs
       mtvec        <= 32'd0;
@@ -1437,14 +1461,14 @@ module core #(
       debug_mode   <= 1'b0;
       // Always start in normal mode
       // Initialize Trigger CSRs
-      tselect   <= 2'd0;
-      tcontrol  <= 32'h00000008;  // mte=1 (bit 3): M-mode triggers enabled
-      mcontext  <= 32'd0;
+      tselect      <= 2'd0;
+      tcontrol     <= 32'h00000008;  // mte=1 (bit 3): M-mode triggers enabled
+      mcontext     <= 32'd0;
       for (int k = 0; k < NUM_TRIGGERS; k++)
       begin
-        tdata1[k] <= 32'd0;
-        tdata2[k] <= 32'd0;
-        tdata3[k] <= 32'd0;
+        tdata1[k]         <= 32'd0;
+        tdata2[k]         <= 32'd0;
+        tdata3[k]         <= 32'd0;
         icount_counter[k] <= 32'd0;
         icount_pending[k] <= 1'b0;
       end
@@ -1558,7 +1582,7 @@ module core #(
               csr_addr == `CSR_ADDR_TDATA1 && tselect == k[1:0])
           begin
             icount_counter[k][13:0] <= csr_wdata[23:10];
-            icount_pending[k] <= csr_wdata[0];  // Pending bit
+            icount_pending[k]       <= csr_wdata[0];  // Pending bit
           end
         end
       end
@@ -1566,15 +1590,15 @@ module core #(
       // ======================================================================
       // Trap Detection (for itrigger and etrigger)
       // ======================================================================
-      trap_taken <= 1'b0;  // Default: no trap
+      trap_taken     <= 1'b0;  // Default: no trap
       interrupt_trap <= 1'b0;
 
       // Detect ECALL (exception trap)
       if (`IS_ECALL(inst) && !debug_mode && instruction_retired)
       begin
-        trap_taken <= 1'b1;
+        trap_taken     <= 1'b1;
         interrupt_trap <= 1'b0;
-        trap_cause <= 32'd11;  // M-mode ECALL
+        trap_cause     <= 32'd11;  // M-mode ECALL
       end
 
       // ======================================================================
@@ -1592,8 +1616,7 @@ module core #(
         mstatus_mpie <= mstatus_mie;
         mstatus_mie  <= 1'b0;
         mstatus_mpp  <= 2'b11;
-      end
-      // Trigger debug mode entry has second priority (action=1)
+      end  // Trigger debug mode entry has second priority (action=1)
       else if (trigger_fire && !debug_mode)
       begin
         // Enter debug mode due to trigger
@@ -1604,8 +1627,7 @@ module core #(
         dpc        <= pc;
         // Jump to Debug ROM entry point
         pc         <= `DEBUG_ENTRY_POINT;
-      end
-      // Debug halt request has third priority
+      end  // Debug halt request has third priority
       else if (i_haltreq && !debug_mode)
       begin
         // Enter debug mode due to halt request
@@ -1676,6 +1698,7 @@ module core #(
 
   // Exit signal
   assign exit = exit_flag;
+  assign gp   = register_file[3];  // x3 is gp
 
 
 endmodule

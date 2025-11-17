@@ -25,7 +25,12 @@ VERILOG_SOURCES = \
 	$(RTL_DIR)/*.vh \
 	$(RTL_DIR)/*.svh \
 	$(DEPS_DIR)/apb/src/apb_pkg.sv \
-	$(DEPS_DIR)/apb/src/apb_intf.sv 
+	$(DEPS_DIR)/apb/src/apb_intf.sv \
+	$(DEPS_DIR)/apb_uart_sv/apb_uart.sv \
+	$(DEPS_DIR)/apb_uart_sv/uart_rx.sv \
+	$(DEPS_DIR)/apb_uart_sv/uart_tx.sv \
+	$(DEPS_DIR)/apb_uart_sv/uart_interrupt.sv \
+	$(DEPS_DIR)/apb_uart_sv/io_generic_fifo.sv
 
 
 # Include paths

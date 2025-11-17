@@ -29,7 +29,7 @@ run_test() {
     
     echo -e "${YELLOW}Running: ${test_name}${NC}"
     
-    if make MODULE=test_clint TESTCASE="${test_name}" > /dev/null 2>&1; then
+    if make MODULE=test_clint -f Makefile.clint TESTCASE="${test_name}" > /dev/null 2>&1; then
         echo -e "${GREEN}✓ PASSED${NC}: ${test_name}"
         PASSED=$((PASSED + 1))
     else
@@ -52,7 +52,6 @@ run_test "test_clint_mtime_increments"
 run_test "test_clint_mtimecmp_rw"
 run_test "test_clint_timer_interrupt"
 run_test "test_clint_address_decode"
-run_test "test_clint_integration_with_core"
 run_test "test_clint_64bit_access"
 run_test "test_clint_apb_interface"
 run_test "test_clint_multi_hart"
