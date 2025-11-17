@@ -3,8 +3,8 @@ rm -f results.xml
 make[1]: Entering directory '/home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/tests'
 /home/cotton/.local/bin/oss-cad-suite/bin/verilator -cc --exe -Mdir sim_build_sdtrig -DCOCOTB_SIM=1 --top-module core -Wno-fatal -Wno-PINMISSING -Wno-IMPLICIT -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-DECLFILENAME -GSTART_ADDR=32\'h00000000 -GHART_ID=0 --timescale 1ns/1ps --vpi --public-flat-rw --prefix Vtop -o Vtop -LDFLAGS "-Wl,-rpath,/home/cotton/code/ADIP-2nd-pretraining-assignments/.venv/lib/python3.12/site-packages/cocotb/libs -L/home/cotton/code/ADIP-2nd-pretraining-assignments/.venv/lib/python3.12/site-packages/cocotb/libs -lcocotbvpi_verilator" +incdir+/home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/rtl/core --timescale 1ns/1ps --vpi --public-flat-rw --prefix Vtop -o Vtop -LDFLAGS "-Wl,-rpath,/home/cotton/code/ADIP-2nd-pretraining-assignments/.venv/lib/python3.12/site-packages/cocotb/libs -L/home/cotton/code/ADIP-2nd-pretraining-assignments/.venv/lib/python3.12/site-packages/cocotb/libs -lcocotbvpi_verilator" +incdir+/home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/rtl/core  /home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/rtl/core/rvcore_simple.sv /home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/rtl/core/cf_math_pkg.sv /home/cotton/code/ADIP-2nd-pretraining-assignments/.venv/lib/python3.12/site-packages/cocotb/share/lib/verilator/verilator.cpp
 - V e r i l a t i o n   R e p o r t: Verilator 5.041 devel rev v5.040-300-g794247450
-- Verilator: Built from 0.151 MB sources in 4 modules, into 0.612 MB in 10 C++ files needing 0.000 MB
-- Verilator: Walltime 0.145 s (elab=0.007, cvt=0.103, bld=0.000); cpu 0.145 s on 1 threads; alloced 28.906 MB
+- Verilator: Built from 0.140 MB sources in 5 modules, into 0.623 MB in 10 C++ files needing 0.000 MB
+- Verilator: Walltime 0.145 s (elab=0.007, cvt=0.103, bld=0.000); cpu 0.145 s on 1 threads; alloced 28.105 MB
 make -C sim_build_sdtrig  -f Vtop.mk
 make[2]: Entering directory '/home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/tests/sim_build_sdtrig'
 g++  -I.  -MMD -I/home/cotton/.local/bin/oss-cad-suite/share/verilator/include -I/home/cotton/.local/bin/oss-cad-suite/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=0 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable      -Os  -c -o verilator.o /home/cotton/code/ADIP-2nd-pretraining-assignments/.venv/lib/python3.12/site-packages/cocotb/share/lib/verilator/verilator.cpp
@@ -25,7 +25,7 @@ MODULE=test_sdtrig TESTCASE= TOPLEVEL=core TOPLEVEL_LANG=verilog \
      -.--ns INFO     gpi                                ../gpi/GpiCommon.cpp:101  in gpi_print_registered_impl       VPI registered
      0.00ns INFO     cocotb                             Running on Verilator version 5.041 devel
      0.00ns INFO     cocotb                             Running tests with cocotb v1.9.2 from /home/cotton/code/ADIP-2nd-pretraining-assignments/.venv/lib/python3.12/site-packages/cocotb
-     0.00ns INFO     cocotb                             Seeding Python random module with 1763376518
+     0.00ns INFO     cocotb                             Seeding Python random module with 1763379073
 /usr/lib/python3.12/argparse.py:2479: UserWarning: Do not expect file_or_dir in Namespace(keyword='', markexpr='', maxfail=0, confcutdir=None, noconftest=False, keepduplicates=False, collect_in_virtualenv=False, continue_on_collection_errors=False, importmode='prepend', basetemp=None, durations=None, durations_min=None, showfixtures=False, show_fixtures_per_test=False, version=0, plugins=[], disable_plugin_autoload=False, traceconfig=False, verbose=0, no_header=False, no_summary=False, fold_skipped=True, force_short_summary=False, reportchars='fE', disable_warnings=False, showlocals=False, tbstyle='auto', xfail_tb=False, showcapture='all', fulltrace=False, color='auto', code_highlight='yes', capture='no', runxfail=False, pastebin=None, assertmode='rewrite', xmlpath=None, junitprefix=None, doctestmodules=False, doctestreport='udiff', doctestglob=[], doctest_ignore_import_errors=False, doctest_continue_on_failure=False, last_failed_no_failures='all', stepwise=False, stepwise_skip=False, stepwise_reset=False, logger_disable=[], markers=False, strict_config=None, strict_markers=None, strict=None, pythonwarnings=None, collectonly=False, pyargs=False, ignore=None, ignore_glob=None, deselect=None, inifilename=None, rootdir=None, help=False, debug=None, override_ini=['python_files=*.py', 'python_files=*.py'], usepdb=False, usepdb_cls=None, trace=False, lf=False, failedfirst=False, newfirst=False, cacheshow=None, cacheclear=False, setuponly=False, setupshow=False, setupplan=False, log_level=None, log_format=None, log_date_format=None, log_cli_level=None, log_cli_format=None, log_cli_date_format=None, log_file=None, log_file_mode=None, log_file_level=None, log_file_format=None, log_file_date_format=None, log_auto_indent=None, file_or_dir=[])
   warn('Do not expect %s in %s' % (action.dest, namespace))
      0.00ns INFO     cocotb.regression                  Found test test_sdtrig.test_trigger_csr_access
@@ -89,16 +89,16 @@ MODULE=test_sdtrig TESTCASE= TOPLEVEL=core TOPLEVEL_LANG=verilog \
   3060.01ns INFO     cocotb.regression                  ************************************************************************************************
                                                         ** TEST                                    STATUS  SIM TIME (ns)  REAL TIME (s)  RATIO (ns/s) **
                                                         ************************************************************************************************
-                                                        ** test_sdtrig.test_trigger_csr_access      PASS         330.00           0.01      56019.29  **
-                                                        ** test_sdtrig.test_execution_trigger       PASS         360.00           0.00      73160.21  **
-                                                        ** test_sdtrig.test_trigger_fire_signal     PASS         290.00           0.00      70529.53  **
-                                                        ** test_sdtrig.test_load_store_trigger      PASS         450.00           0.01      74649.62  **
-                                                        ** test_sdtrig.test_external_trigger        PASS         190.00           0.00      53191.96  **
-                                                        ** test_sdtrig.test_multiple_triggers       PASS         870.00           0.01      70815.44  **
-                                                        ** test_sdtrig.test_trigger_priority        PASS         180.00           0.00      54467.85  **
-                                                        ** test_sdtrig.test_trigger_in_debug_mode   PASS         390.00           0.01      67692.23  **
+                                                        ** test_sdtrig.test_trigger_csr_access      PASS         330.00           0.01      50665.27  **
+                                                        ** test_sdtrig.test_execution_trigger       PASS         360.00           0.01      62645.88  **
+                                                        ** test_sdtrig.test_trigger_fire_signal     PASS         290.00           0.00      61913.49  **
+                                                        ** test_sdtrig.test_load_store_trigger      PASS         450.00           0.01      71504.81  **
+                                                        ** test_sdtrig.test_external_trigger        PASS         190.00           0.00      49116.92  **
+                                                        ** test_sdtrig.test_multiple_triggers       PASS         870.00           0.01      69323.47  **
+                                                        ** test_sdtrig.test_trigger_priority        PASS         180.00           0.00      50806.12  **
+                                                        ** test_sdtrig.test_trigger_in_debug_mode   PASS         390.00           0.01      58433.33  **
                                                         ************************************************************************************************
-                                                        ** TESTS=8 PASS=8 FAIL=0 SKIP=0                         3060.01           0.14      22052.77  **
+                                                        ** TESTS=8 PASS=8 FAIL=0 SKIP=0                         3060.01           0.10      29768.65  **
                                                         ************************************************************************************************
                                                         
 - :0: Verilog $finish
