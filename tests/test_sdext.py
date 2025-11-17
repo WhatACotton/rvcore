@@ -276,21 +276,21 @@ async def test_dscratch_registers(dut):
     debug_mode = int(dut.debug_mode_o.value)
     assert debug_mode == 1, "Should be in debug mode"
     
-    # Test dscratch0
+    # Test dscratch0 - now individual registers
     test_value0 = 0xDEADBEEF
-    dut.cpu.csr_file[CSR_DSCRATCH0].value = test_value0
+    dut.cpu.dscratch0.value = test_value0
     await ClockCycles(dut.clk, 2)
     
-    read_value0 = int(dut.cpu.csr_file[CSR_DSCRATCH0].value)
+    read_value0 = int(dut.cpu.dscratch0.value)
     dut._log.info(f"dscratch0: write=0x{test_value0:08x}, read=0x{read_value0:08x}")
     assert read_value0 == test_value0, f"dscratch0 mismatch"
     
-    # Test dscratch1
+    # Test dscratch1 - now individual registers
     test_value1 = 0xCAFEBABE
-    dut.cpu.csr_file[CSR_DSCRATCH1].value = test_value1
+    dut.cpu.dscratch1.value = test_value1
     await ClockCycles(dut.clk, 2)
     
-    read_value1 = int(dut.cpu.csr_file[CSR_DSCRATCH1].value)
+    read_value1 = int(dut.cpu.dscratch1.value)
     dut._log.info(f"dscratch1: write=0x{test_value1:08x}, read=0x{read_value1:08x}")
     assert read_value1 == test_value1, f"dscratch1 mismatch"
     

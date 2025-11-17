@@ -196,8 +196,8 @@ module core #(
 
   // Register file and CSR
   logic [  31:0][31:0] register_file;
-  logic [4095:0][31:0] csr_file;
 
+  // Individual CSR registers (no large CSR file array for better synthesis)
   // M-Mode CSR registers
   logic [  31:0]       mtvec;
   // Machine trap-handler base address
@@ -244,6 +244,13 @@ module core #(
 
   // Output debug mode status
   assign debug_mode_o = debug_mode;
+
+  // Debug scratch registers (individual registers instead of CSR file)
+  logic [31:0] dscratch0;
+  logic [31:0] dscratch1;
+
+  // Hart ID register
+  logic [31:0] mhartid;
 
   // ==========================================================================
   // Trigger Module (Sdtrig - Separated for better synthesis)
@@ -295,7 +302,7 @@ module core #(
                         .tdata3(tdata3),
                         .tcontrol(tcontrol),
                         .mcontext(mcontext),
-                        .pc(pc),
+                        .pc(inst_pc),
                         .mem_access_addr(mem_access_addr),
                         .mem_load_req(mem_load_req),
                         .mem_store_req(mem_store_req),
@@ -316,6 +323,8 @@ module core #(
   logic [31:0] pc;
   // Current instruction
   logic [31:0] inst;
+  // Saved PC for current instruction (to break timing path)
+  logic [31:0] inst_pc;
   // Saved instruction and address for memory operations (used in writeback)
   logic [31:0] mem_inst;
   logic [31:0] mem_addr_saved;
@@ -355,13 +364,15 @@ module core #(
   begin
     if (!reset_n)
     begin
-      inst <= 32'd0;
+      inst    <= 32'd0;
+      inst_pc <= 32'd0;
     end
     else
     begin
       if (proc_state == IMEM_READ && imem_rready && imem_rvalid)
       begin
-        inst <= imem_rdata;
+        inst    <= imem_rdata;
+        inst_pc <= pc;  // Save PC along with instruction to break timing path
       end
     end
   end
@@ -854,7 +865,7 @@ module core #(
       `OP1_RS1:
         op1_data = rs1_data;
       `OP1_PC:
-        op1_data = pc;
+        op1_data = inst_pc;
       `OP1_IMZ:
         op1_data = imm_z;
       default:
@@ -959,8 +970,10 @@ module core #(
         csr_rdata = debug_mode ? dcsr : 32'd0;
       `CSR_ADDR_DPC:
         csr_rdata = debug_mode ? dpc : 32'd0;
-      `CSR_ADDR_DSCRATCH0, `CSR_ADDR_DSCRATCH1:
-        csr_rdata = debug_mode ? csr_file[csr_addr] : 32'd0;
+      `CSR_ADDR_DSCRATCH0:
+        csr_rdata = debug_mode ? dscratch0 : 32'd0;
+      `CSR_ADDR_DSCRATCH1:
+        csr_rdata = debug_mode ? dscratch1 : 32'd0;
       `CSR_ADDR_TSELECT:
         csr_rdata = {30'd0, tselect};
       `CSR_ADDR_TDATA1:
@@ -976,11 +989,9 @@ module core #(
       `CSR_ADDR_MCONTEXT:
         csr_rdata = mcontext;
       12'hF14:
-      begin  // mhartid
-        csr_rdata = csr_file[csr_addr];
-      end
+        csr_rdata = mhartid;  // mhartid
       default:
-        csr_rdata = csr_file[csr_addr];
+        csr_rdata = 32'd0;  // Unsupported CSRs return 0
     endcase
   end
 
@@ -1200,7 +1211,7 @@ module core #(
         end
       end
       `WB_PC:
-        wb_data = pc + 32'd4;
+        wb_data = inst_pc + 32'd4;
       `WB_CSR:
         wb_data = csr_rdata;
       `WB_ALU:
@@ -1222,9 +1233,6 @@ module core #(
       begin
         register_file[i] <= 32'd0;
       end
-      // CSR file is not fully initialized - only specific CSRs are used
-      // This significantly improves synthesis time
-      // Individual CSRs are initialized below
 
       // Initialize M-Mode CSRs
       mtvec        <= 32'd0;
@@ -1233,13 +1241,19 @@ module core #(
       mstatus_mie  <= 1'b0;  // Interrupts disabled at reset
       mstatus_mpie <= 1'b0;
       mstatus_mpp  <= 2'b11;  // Previous privilege = M-mode
+
       // Initialize Debug CSRs
       dcsr_cause   <= 3'd0;
       dcsr_step    <= 1'b0;
-      dcsr_prv     <= 2'b11;
-      // M-mode
-      debug_mode   <= 1'b0;
-      // Always start in normal mode
+      dcsr_prv     <= 2'b11;  // M-mode
+      debug_mode   <= 1'b0;   // Always start in normal mode
+      dpc          <= 32'd0;
+      dscratch0    <= 32'd0;
+      dscratch1    <= 32'd0;
+
+      // Initialize Hart ID
+      mhartid      <= HART_ID;
+
       // Initialize Trigger CSRs
       tselect      <= 2'd0;
       tcontrol     <= 32'h00000008;  // mte=1 (bit 3): M-mode triggers enabled
@@ -1252,8 +1266,7 @@ module core #(
         icount_counter[k] <= 32'd0;
         icount_pending[k] <= 1'b0;
       end
-      // Initialize mhartid CSR (0xF14 = 3860) with HART_ID parameter
-      csr_file[12'hF14] <= HART_ID;
+
       trap_taken        <= 1'b0;
       interrupt_trap    <= 1'b0;
       trap_cause        <= 32'd0;
@@ -1314,11 +1327,12 @@ module core #(
             `CSR_ADDR_DPC:
               if (debug_mode)
                 dpc <= csr_wdata;
-            `CSR_ADDR_DSCRATCH0, `CSR_ADDR_DSCRATCH1:
+            `CSR_ADDR_DSCRATCH0:
               if (debug_mode)
-              begin
-                csr_file[csr_addr] <= csr_wdata;
-              end
+                dscratch0 <= csr_wdata;
+            `CSR_ADDR_DSCRATCH1:
+              if (debug_mode)
+                dscratch1 <= csr_wdata;
             `CSR_ADDR_TSELECT:
               tselect <= csr_wdata[1:0];  // Only 2 bits for 4 triggers
             `CSR_ADDR_TDATA1:
@@ -1332,7 +1346,7 @@ module core #(
             `CSR_ADDR_MCONTEXT:
               mcontext <= csr_wdata;
             default:
-              csr_file[csr_addr] <= csr_wdata;
+              ;  // Unsupported CSRs - no operation
           endcase
         end
       end
@@ -1390,7 +1404,7 @@ module core #(
       begin
         // Trigger exception (breakpoint exception)
         pc           <= mtvec;
-        mepc         <= pc;
+        mepc         <= inst_pc;
         mcause       <= 32'd3;  // Breakpoint exception (cause=3)
         mstatus_mpie <= mstatus_mie;
         mstatus_mie  <= 1'b0;
@@ -1403,7 +1417,7 @@ module core #(
         dcsr_cause <= `DEBUG_CAUSE_TRIGGER;  // cause = 2 (trigger)
         dcsr_prv   <= 2'b11;  // M-mode
         // Save PC of triggering instruction
-        dpc        <= pc;
+        dpc        <= inst_pc;
         // Jump to Debug ROM entry point
         pc         <= `DEBUG_ENTRY_POINT;
       end  // Debug halt request has third priority
@@ -1434,7 +1448,7 @@ module core #(
       begin  // Must be retired
         // ECALL: Jump to trap handler (mtvec) and save return address
         pc           <= mtvec;
-        mepc         <= pc + 32'd4;
+        mepc         <= inst_pc + 32'd4;
         // Save PC of next instruction, not current
         mcause       <= 32'd11;
         // Environment call from M-mode (cause code 11)
@@ -1460,7 +1474,7 @@ module core #(
       begin
         if (br_flg)
         begin
-          pc <= pc + imm_b;
+          pc <= inst_pc + imm_b;
         end
         else if (wb_sel == `WB_PC)
         begin
@@ -1468,7 +1482,7 @@ module core #(
         end
         else
         begin
-          pc <= pc + 32'd4;
+          pc <= inst_pc + 32'd4;
         end
       end
 
