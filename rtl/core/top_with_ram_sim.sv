@@ -11,7 +11,9 @@ module top_with_ram_sim #(
     parameter int        HART_ID        = 0,             // Hart ID for debug output
     parameter bit [31:0] TOHOST_ADDR    = 32'h80001000,  // tohost address for tests
     parameter bit [31:0] UART_BASE_ADDR = 32'h00000100,  // UART base address in APB space
-    parameter bit [31:0] UART_ADDR_MASK = 32'h00000FF0   // UART address mask (16-byte region)
+    parameter bit [31:0] UART_ADDR_MASK = 32'h00000FF0,  // UART address mask (16-byte region)
+    parameter string     IMEM_INIT_FILE = "",            // IMEM initialization file (optional, for compatibility)
+    parameter string     DMEM_INIT_FILE = ""             // DMEM initialization file (optional, for compatibility)
   ) (
     input logic clk,
     input logic reset_n,
@@ -546,7 +548,8 @@ module top_with_ram_sim #(
 
   imem_gowin_bram #(
                     .DEPTH     (IMEM_DEPTH),
-                    .ADDR_WIDTH(12)
+                    .ADDR_WIDTH(12),
+                    .INIT_FILE (IMEM_INIT_FILE)
                   ) imem_bram_inst (
                     .clk    (clk),
                     .reset_n(reset_n),
@@ -565,7 +568,8 @@ module top_with_ram_sim #(
 
   dmem_gowin_bram #(
                     .DEPTH     (DMEM_DEPTH),
-                    .ADDR_WIDTH(12)
+                    .ADDR_WIDTH(12),
+                    .INIT_FILE (DMEM_INIT_FILE)
                   ) dmem_bram_inst (
                     .clk      (clk),
                     .reset_n  (reset_n),
@@ -667,8 +671,9 @@ endmodule
  * Port B: Read (for instruction fetch)
  */
 module imem_gowin_bram #(
-    parameter DEPTH      = 4096,
-    parameter ADDR_WIDTH = 12
+    parameter        DEPTH      = 4096,
+    parameter        ADDR_WIDTH = 12,
+    parameter string INIT_FILE  = ""  // Optional initialization file
   ) (
     input  logic                  clk,
     input  logic                  reset_n,
@@ -682,7 +687,7 @@ module imem_gowin_bram #(
   logic [31:0] mem         [DEPTH-1:0];
   logic [31:0] rd_data_reg;
 
-  // Initialize memory from firmware.hex file
+  // Initialize memory from file or firmware.hex
   // File should contain 32-bit words in hex format (one per line)
   // Use @address directive for non-contiguous sections
   initial
@@ -692,13 +697,21 @@ module imem_gowin_bram #(
     begin
       mem[i] = 32'h00000013;  // NOP (addi x0, x0, 0)
     end
-    // Then load from firmware.hex if it exists
-    // File is in Verilog hex format: 32-bit words, one per line
+    // Then load from specified file or default firmware.hex
     `ifndef SYNTHESIS
-            $display("[IMEM] Attempting to load firmware.hex...");
-    $readmemh("firmware.hex", mem);
-    $display("[IMEM] Memory load complete. First 4 words:");
-    $display("[IMEM]   mem[0] = 0x%08h", mem[0]);
+            if (INIT_FILE != "")
+            begin
+              $display("[IMEM] Attempting to load %s...", INIT_FILE);
+              $readmemh(INIT_FILE, mem);
+              $display("[IMEM] Memory load complete from %s. First 4 words:", INIT_FILE);
+            end
+            else
+            begin
+              $display("[IMEM] Attempting to load firmware.hex...");
+              $readmemh("firmware.hex", mem);
+              $display("[IMEM] Memory load complete. First 4 words:");
+            end
+            $display("[IMEM]   mem[0] = 0x%08h", mem[0]);
     $display("[IMEM]   mem[1] = 0x%08h", mem[1]);
     $display("[IMEM]   mem[2] = 0x%08h", mem[2]);
     $display("[IMEM]   mem[3] = 0x%08h", mem[3]);
@@ -729,8 +742,9 @@ endmodule
  * Port B: Write only (for initialization)
  */
 module dmem_gowin_bram #(
-    parameter DEPTH      = 4096,
-    parameter ADDR_WIDTH = 12
+    parameter        DEPTH      = 4096,
+    parameter        ADDR_WIDTH = 12,
+    parameter string INIT_FILE  = ""  // Optional initialization file
   ) (
     input  logic                  clk,
     input  logic                  reset_n,
@@ -746,7 +760,7 @@ module dmem_gowin_bram #(
   logic [31:0] mem         [DEPTH-1:0];
   logic [31:0] rd_data_reg;
 
-  // Initialize memory from firmware.hex file
+  // Initialize memory from file or firmware.hex
   // File should contain 32-bit words in hex format (one per line)
   // Use @address directive for non-contiguous sections
   initial
@@ -756,13 +770,21 @@ module dmem_gowin_bram #(
     begin
       mem[i] = 32'h00000013;  // NOP (addi x0, x0, 0)
     end
-    // Then load from firmware.hex if it exists
-    // File is in Verilog hex format: 32-bit words, one per line
+    // Then load from specified file or default firmware.hex
     `ifndef SYNTHESIS
-            $display("[DMEM] Attempting to load firmware.hex...");
-    $readmemh("firmware.hex", mem);
-    $display("[DMEM] Memory load complete. First 4 words:");
-    $display("[DMEM]   mem[0] = 0x%08h", mem[0]);
+            if (INIT_FILE != "")
+            begin
+              $display("[DMEM] Attempting to load %s...", INIT_FILE);
+              $readmemh(INIT_FILE, mem);
+              $display("[DMEM] Memory load complete from %s. First 4 words:", INIT_FILE);
+            end
+            else
+            begin
+              $display("[DMEM] Attempting to load firmware.hex...");
+              $readmemh("firmware.hex", mem);
+              $display("[DMEM] Memory load complete. First 4 words:");
+            end
+            $display("[DMEM]   mem[0] = 0x%08h", mem[0]);
     $display("[DMEM]   mem[1] = 0x%08h", mem[1]);
     $display("[DMEM]   mem[2] = 0x%08h", mem[2]);
     $display("[DMEM]   mem[3] = 0x%08h", mem[3]);
