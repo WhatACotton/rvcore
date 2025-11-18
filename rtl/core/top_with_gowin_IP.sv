@@ -2,16 +2,19 @@
 // This wraps the core with simple memory models for simulation testing
 
 `timescale 1ns / 1ps
+`include "dm_reg_addr.vh"
 
-module top_with_ram_sim #(
-    parameter int        START_ADDR     = 32'h00000000,
-    parameter int        MEM_SIZE       = 1024 * 1024,   // 1MB
-    parameter int        ADDR_WIDTH     = 13,
-    parameter int        DATA_WIDTH     = 32,
-    parameter int        HART_ID        = 0,             // Hart ID for debug output
-    parameter bit [31:0] TOHOST_ADDR    = 32'h80001000,  // tohost address for tests
-    parameter bit [31:0] UART_BASE_ADDR = 32'h00000100,  // UART base address in APB space
-    parameter bit [31:0] UART_ADDR_MASK = 32'h00000FF0   // UART address mask (16-byte region)
+module top_with_ram_sim_gw #(
+    parameter int        START_ADDR      = 32'h00000000,
+    parameter int        MEM_SIZE        = 1024 * 1024,   // 1MB
+    parameter int        ADDR_WIDTH      = 13,
+    parameter int        DATA_WIDTH      = 32,
+    parameter int        HART_ID         = 0,              // Hart ID for debug output
+    parameter bit [31:0] TOHOST_ADDR     = 32'h80001000,   // tohost address for tests
+    parameter bit [31:0] UART_BASE_ADDR  = 32'h00000100,   // UART base address in APB space
+    parameter bit [31:0] UART_ADDR_MASK  = 32'h00000FF0,   // UART address mask (16-byte region)
+    parameter string     IMEM_INIT_FILE  = "",            // Instruction memory initialization file
+    parameter string     DMEM_INIT_FILE  = ""             // Data memory initialization file
   ) (
     input logic clk,
     input logic reset_n,
@@ -59,11 +62,11 @@ module top_with_ram_sim #(
   //  Internal Memory - Gowin BRAM Implementation
   // =================================================================
   // Use Gowin Block RAM primitives for synthesis
-  // Memory is initialized from firmware.hex file via $readmemh in initial block
+  // Memory initialization is handled externally via init ports (Gowin IP)
 
   // Gowin BRAM instantiation parameters
-  localparam IMEM_DEPTH = 4096;  // 16KB / 4 bytes
-  localparam DMEM_DEPTH = 4096;  // 16KB / 4 bytes
+  localparam IMEM_DEPTH = 4000;  // 16KB / 4 bytes
+  localparam DMEM_DEPTH = 4000;  // 16KB / 4 bytes
 
   // IMEM signals for Gowin BRAM
   logic [31:0] imem_bram_dout;
@@ -550,6 +553,9 @@ module top_with_ram_sim #(
                   ) imem_bram_inst (
                     .clk    (clk),
                     .reset_n(reset_n),
+                    .wr_en  (1'b0),
+                    .wr_addr(12'b0),
+                    .wr_data(32'b0),
                     .rd_en  (cpu_imem_rready && !is_debug_rom_fetch),
                     .rd_addr(imem_bram_addr),
                     .rd_data(imem_bram_dout)
@@ -573,7 +579,10 @@ module top_with_ram_sim #(
                     .rd_en    (cpu_dmem_rready && !is_debug_data_access && !is_clint_access),
                     .addr     (dmem_bram_addr),
                     .wr_data  (dmem_wdata),
-                    .rd_data  (dmem_bram_dout)
+                    .rd_data  (dmem_bram_dout),
+                    .init_wen (1'b0),
+                    .init_addr(12'b0),
+                    .init_data(32'b0)
                   );
 
   assign dmem_rdata = is_clint_access ? clint_prdata :
@@ -609,18 +618,15 @@ module top_with_ram_sim #(
          .clk    (clk),
          .reset_n(cpu_reset_n),
 
-         // DMEM Write Interface
          .dmem_wready(cpu_dmem_wready),
          .dmem_wvalid(cpu_dmem_wvalid),
          .dmem_wdata (dmem_wdata),
          .dmem_addr  (dmem_addr),
 
-         // DMEM Read Interface
          .dmem_rvalid(cpu_dmem_rvalid),
          .dmem_rready(cpu_dmem_rready),
          .dmem_rdata (dmem_rdata),
 
-         // IMEM Read Interface
          .imem_rready(cpu_imem_rready),
          .imem_rvalid(cpu_imem_rvalid),
          .imem_rdata (imem_rdata),
@@ -628,16 +634,13 @@ module top_with_ram_sim #(
 
          .exit(exit),
 
-         // Interrupt inputs
          .m_external_interrupt(1'b0),
          .m_timer_interrupt   (m_timer_interrupt),
          .m_software_interrupt(1'b0),
 
-         // Debug interface
          .i_haltreq   (i_haltreq),
          .debug_mode_o(debug_mode),
 
-         // External triggers
          .i_external_trigger(i_external_trigger),
          .o_external_trigger(o_external_trigger),
          .gp                (gp)
@@ -652,7 +655,7 @@ module top_with_ram_sim #(
   // Debug module interface
   assign o_hartreset   = i_resetreq;
   assign o_nonexistent = 1'b0;  // Hart exists
-  assign o_unavailable = 1'b0;  // Core is always available after reset
+  assign o_unavailable = 1'b0;  // Hart is always available
 
 endmodule
 
@@ -666,59 +669,72 @@ endmodule
  * Port A: Write (for initialization)
  * Port B: Read (for instruction fetch)
  */
+/*
+ * モジュール名: imem_gowin_bram
+ *
+ * 元の imem_gowin_bram.sv とIO互換性を持つラッパーモジュールです。
+ * BRAM推論の代わりに、GowinのBRAM IPコア 'Gowin_DPB' を明示的にインスタンス化します。
+ *
+ * !!! 
+ * 注意: Gowin IP Core Generatorで、以下の設定を持つ 'Gowin_DPB' という名前の
+ * IPを生成し、プロジェクトに追加する必要があります。
+ *
+ * 1. Mode:           True Dual Port
+ * 2. Port A (Write): Data Width = 32, Depth = 4096 (Address Width 12)
+ * 3. Port B (Read):  Data Width = 32, Depth = 4096 (Address Width 12)
+ * 4. Port B Read Mode: Pipeline (または Registered) <-- PA2122エラー回避に重要
+ * 5. Port A Write Mode: Normal
+ * !!!
+ */
 module imem_gowin_bram #(
     parameter DEPTH      = 4096,
     parameter ADDR_WIDTH = 12
   ) (
-    input  logic                  clk,
-    input  logic                  reset_n,
-    // Read port
-    input  logic                  rd_en,
-    input  logic [ADDR_WIDTH-1:0] rd_addr,
-    output logic [          31:0] rd_data
+    input  logic                     clk,
+    input  logic                     reset_n,
+    // Write port (Port A of DPB) - for initialization
+    input  logic                     wr_en,
+    input  logic [ADDR_WIDTH-1:0]    wr_addr,
+    input  logic [31:0]              wr_data,
+    // Read port (Port B of DPB)
+    input  logic                     rd_en,
+    input  logic [ADDR_WIDTH-1:0]    rd_addr,
+    output logic [31:0]              rd_data
   );
 
-  // Inferred BRAM with proper attributes for Gowin
-  logic [31:0] mem         [DEPTH-1:0];
-  logic [31:0] rd_data_reg;
+  // GowinのBRAMプリミティブは通常アクティブハイリセットを使います。
+  // 元のモジュールはアクティブロー (reset_n) なので、反転させます。
+  logic active_reset;
+  assign active_reset = ~reset_n;
 
-  // Initialize memory from firmware.hex file
-  // File should contain 32-bit words in hex format (one per line)
-  // Use @address directive for non-contiguous sections
-  initial
-  begin
-    // First initialize all to NOPs
-    for (int i = 0; i < DEPTH; i++)
-    begin
-      mem[i] = 32'h00000013;  // NOP (addi x0, x0, 0)
-    end
-    // Then load from firmware.hex if it exists
-    // File is in Verilog hex format: 32-bit words, one per line
-    `ifndef SYNTHESIS
-            $display("[IMEM] Attempting to load firmware.hex...");
-    $readmemh("firmware.hex", mem);
-    $display("[IMEM] Memory load complete. First 4 words:");
-    $display("[IMEM]   mem[0] = 0x%08h", mem[0]);
-    $display("[IMEM]   mem[1] = 0x%08h", mem[1]);
-    $display("[IMEM]   mem[2] = 0x%08h", mem[2]);
-    $display("[IMEM]   mem[3] = 0x%08h", mem[3]);
-`endif
+  // Gowin_DPB IPコアのインスタンス化
+  Gowin_DPB u_bram (
+              // Port A (書き込みポートとして使用)
+              .clka   (clk),
+              .reseta (active_reset),
+              .cea    (wr_en),        // 書き込み時のみクロックイネーブル
+              .ocea   (1'b0),         // Port A の出力は使わない
+              .wrea   (wr_en),        // 書き込みイネーブル
+              .ada    (wr_addr),
+              .dina   (wr_data),
+              .douta  (),             // Port A の出力は未接続
 
-  end
+              // Port B (読み取りポートとして使用)
+              .clkb   (clk),
+              .resetb (active_reset),
+              .ceb    (rd_en),        // 読み取り時のみクロックイネーブル
+              .oceb   (rd_en),        // 出力レジスタのクロックイネーブル
+              .wreb   (1'b0),         // Port B は書き込みしない
+              .adb    (rd_addr),
+              .dinb   (32'b0),        // Port B の入力は使わない
+              .doutb  (rd_data)       // BRAMのレジスタ出力を直接rd_dataに接続
+            );
 
-  // Read port with pipeline register
-  always_ff @(posedge clk)
-  begin
-    if (rd_en)
-    begin
-      rd_data_reg <= mem[rd_addr];
-    end
-  end
-
-  assign rd_data = rd_data_reg;
-
-  // Synthesis attributes for Gowin BRAM inference
-  // synthesis syn_ramstyle = "block_ram"
+  // 元のコードにあった 'rd_data_reg' は不要になります。
+  // なぜなら、IPコアを「Pipeline (Registered) Read」モードで生成することにより、
+  // 'doutb' ポート自体がBRAM内部のレジスタ出力になるためです。
+  // これにより、余分なロジックが削減され、タイミングが改善し、
+  // サポートされていない読み取りモード（エラーの原因）を回避できます。
 
 endmodule
 
@@ -728,68 +744,70 @@ endmodule
  * Port A: Read/Write (for data access)
  * Port B: Write only (for initialization)
  */
+/*
+ * モジュール名: dmem_gowin_bram
+ *
+ * 元の dmem_gowin_bram.sv とIO互換性を持つラッパーモジュールです。
+ * BRAM推論の代わりに、GowinのBRAM IPコア 'Gowin_DPB' を明示的にインスタンス化します。
+ *
+ * !!! 
+ * 注意: Gowin IP Core Generatorで、以下の設定を持つ 'Gowin_DPB' という名前の
+ * IPを生成し、プロジェクトに追加する必要があります。
+ *
+ * 1. Mode:           True Dual Port
+ * 2. Port A (R/W):   Data Width = 32, Depth = 4096 (Address Width 12)
+ * 3. Port B (Write): Data Width = 32, Depth = 4096 (Address Width 12)
+ * 4. Port A Read Mode: Pipeline (または Registered) <-- PA2122エラー回避に重要
+ * 5. Port A Write Mode: Normal (または Write-Through)
+ * 6. Port B Write Mode: Normal
+ * !!!
+ */
 module dmem_gowin_bram #(
     parameter DEPTH      = 4096,
     parameter ADDR_WIDTH = 12
   ) (
-    input  logic                  clk,
-    input  logic                  reset_n,
-    // Main data access
-    input  logic                  wr_en,
-    input  logic                  rd_en,
-    input  logic [ADDR_WIDTH-1:0] addr,
-    input  logic [          31:0] wr_data,
-    output logic [          31:0] rd_data
+    input  logic                     clk,
+    input  logic                     reset_n,
+    // Port A: Main data access (R/W)
+    input  logic                     wr_en,
+    input  logic                     rd_en,
+    input  logic [ADDR_WIDTH-1:0]    addr,
+    input  logic [31:0]              wr_data,
+    output logic [31:0]              rd_data,
+    // Port B: Initialization (Write-Only)
+    input  logic                     init_wen,
+    input  logic [ADDR_WIDTH-1:0]    init_addr,
+    input  logic [31:0]              init_data
   );
 
-  // Inferred BRAM with proper attributes for Gowin
-  logic [31:0] mem         [DEPTH-1:0];
-  logic [31:0] rd_data_reg;
+  // GowinのBRAMプリミティブは通常アクティブハイリセットを使います。
+  logic active_reset;
+  assign active_reset = ~reset_n;
 
-  // Initialize memory from firmware.hex file
-  // File should contain 32-bit words in hex format (one per line)
-  // Use @address directive for non-contiguous sections
-  initial
-  begin
-    // First initialize all to NOPs
-    for (int i = 0; i < DEPTH; i++)
-    begin
-      mem[i] = 32'h00000013;  // NOP (addi x0, x0, 0)
-    end
-    // Then load from firmware.hex if it exists
-    // File is in Verilog hex format: 32-bit words, one per line
-    `ifndef SYNTHESIS
-            $display("[DMEM] Attempting to load firmware.hex...");
-    $readmemh("firmware.hex", mem);
-    $display("[DMEM] Memory load complete. First 4 words:");
-    $display("[DMEM]   mem[0] = 0x%08h", mem[0]);
-    $display("[DMEM]   mem[1] = 0x%08h", mem[1]);
-    $display("[DMEM]   mem[2] = 0x%08h", mem[2]);
-    $display("[DMEM]   mem[3] = 0x%08h", mem[3]);
-`endif
+  // Gowin_DPB IPコアのインスタンス化
+  Gowin_DPB u_bram (
+              // Port A (メインのR/Wポートとして使用)
+              .clka   (clk),
+              .reseta (active_reset),
+              .cea    (wr_en || rd_en), // 読み書き時
+              .ocea   (rd_en),          // 出力レジスタのクロックイネーブル
+              .wrea   (wr_en),          // 書き込みイネーブル
+              .ada    (addr),
+              .dina   (wr_data),
+              .douta  (rd_data),        // BRAMのレジスタ出力を直接rd_dataに接続
 
-  end
+              // Port B (初期化用の書き込み専用ポートとして使用)
+              .clkb   (clk),
+              .resetb (active_reset),
+              .ceb    (init_wen),       // 初期化書き込み時
+              .oceb   (1'b0),           // Port B の出力は使わない
+              .wreb   (init_wen),       // 書き込みイネーブル
+              .adb    (init_addr),
+              .dinb   (init_data),
+              .doutb  ()                // Port B の出力は未接続
+            );
 
-  // Read/Write
-  always_ff @(posedge clk)
-  begin
-    if (wr_en)
-    begin
-      mem[addr] <= wr_data;
-    end
-  end
-
-  always_ff @(posedge clk)
-  begin
-    if (rd_en)
-    begin
-      rd_data_reg <= mem[addr];
-    end
-  end
-
-  assign rd_data = rd_data_reg;
-
-  // Synthesis attributes for Gowin BRAM inference
-  // synthesis syn_ramstyle = "block_ram"
+  // imemと同様に、'rd_data_reg' はBRAM IP内部の
+  // パイプラインレジスタで置き換えられます。
 
 endmodule

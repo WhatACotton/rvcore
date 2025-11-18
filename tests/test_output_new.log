@@ -1,0 +1,125 @@
+Running test: rv32ui-p-add
+
+Converting riscv_test_hex/rv32ui-p-add.hex to firmware.hex (word format)
+Converted 1788 bytes to 450 words
+Address range: 0x00000000 - 0x00000707
+Output: firmware.hex
+mkdir -p sim_build
+/home/cotton/.local/bin/oss-cad-suite/bin/verilator -cc --exe -Mdir sim_build -DCOCOTB_SIM=1 --top-module top_with_ram_sim -Wno-fatal -Wno-PINMISSING -Wno-IMPLICIT -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-DECLFILENAME -DCLINT_BASE=32\'h02000000 -DCLINT_END=32\'h0200FFFF -DDEBUG_AREA_START=32\'h00000000 -DDEBUG_AREA_END=32\'h00001000 -GSTART_ADDR=32\'h00000000 -GTOHOST_ADDR=32\'h000006C0 -GUART_BASE_ADDR=32\'h00000100 -GUART_ADDR_MASK=32\'h00000FF0 --timescale 1ns/1ps --vpi --public-flat-rw --prefix Vtop -o Vtop -LDFLAGS "-Wl,-rpath,/home/cotton/code/ADIP-2nd-pretraining-assignments/.venv/lib/python3.12/site-packages/cocotb/libs -L/home/cotton/code/ADIP-2nd-pretraining-assignments/.venv/lib/python3.12/site-packages/cocotb/libs -lcocotbvpi_verilator" +incdir+/home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/rtl/core +incdir+/home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/deps/apb/src -v /home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/rtl/core/alu_module.sv /home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/rtl/core/apb_arbiter.sv /home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/rtl/core/cf_math_pkg.sv /home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/rtl/core/clint.sv /home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/rtl/core/decoder_module.sv /home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/rtl/core/rvcore_simple.sv /home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/rtl/core/top_with_ram_sim.sv /home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/rtl/core/trigger_module_comb.sv /home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/rtl/core/trigger_module.sv /home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/rtl/core/*.vh /home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/rtl/core/*.svh /home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/deps/apb/src/apb_pkg.sv /home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/deps/apb/src/apb_intf.sv /home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/deps/apb_uart_sv/apb_uart.sv /home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/deps/apb_uart_sv/uart_rx.sv /home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/deps/apb_uart_sv/uart_tx.sv /home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/deps/apb_uart_sv/uart_interrupt.sv /home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/deps/apb_uart_sv/io_generic_fifo.sv /home/cotton/code/ADIP-2nd-pretraining-assignments/.venv/lib/python3.12/site-packages/cocotb/share/lib/verilator/verilator.cpp
+%Warning-LATCH: /home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/deps/apb_uart_sv/apb_uart.sv:195:5: Latch inferred for signal 'top_with_ram_sim.uart_inst.fifo_tx_data' (not all control paths of combinational always assign a value)
+                                                                                                                 : ... Suggest use of always_latch for intentional latches
+  195 |     always_comb
+      |     ^~~~~~~~~~~
+                ... For warning description see https://verilator.org/warn/LATCH?v=5.041
+                ... Use "/* verilator lint_off LATCH */" and lint_on around source to disable this message.
+- V e r i l a t i o n   R e p o r t: Verilator 5.041 devel rev v5.040-300-g794247450
+- Verilator: Built from 2.557 MB sources in 21 modules, into 1.077 MB in 17 C++ files needing 0.000 MB
+- Verilator: Walltime 0.252 s (elab=0.020, cvt=0.160, bld=0.000); cpu 0.251 s on 1 threads; alloced 32.031 MB
+make -C sim_build  -f Vtop.mk
+make[1]: Entering directory '/home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/tests/sim_build'
+g++  -I.  -MMD -I/home/cotton/.local/bin/oss-cad-suite/share/verilator/include -I/home/cotton/.local/bin/oss-cad-suite/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=0 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable      -Os  -c -o verilator.o /home/cotton/code/ADIP-2nd-pretraining-assignments/.venv/lib/python3.12/site-packages/cocotb/share/lib/verilator/verilator.cpp
+g++ -Os  -I.  -MMD -I/home/cotton/.local/bin/oss-cad-suite/share/verilator/include -I/home/cotton/.local/bin/oss-cad-suite/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=0 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable      -c -o verilated.o /home/cotton/.local/bin/oss-cad-suite/share/verilator/include/verilated.cpp
+g++ -Os  -I.  -MMD -I/home/cotton/.local/bin/oss-cad-suite/share/verilator/include -I/home/cotton/.local/bin/oss-cad-suite/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=0 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable      -c -o verilated_dpi.o /home/cotton/.local/bin/oss-cad-suite/share/verilator/include/verilated_dpi.cpp
+g++ -Os  -I.  -MMD -I/home/cotton/.local/bin/oss-cad-suite/share/verilator/include -I/home/cotton/.local/bin/oss-cad-suite/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=0 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable      -c -o verilated_vpi.o /home/cotton/.local/bin/oss-cad-suite/share/verilator/include/verilated_vpi.cpp
+g++ -Os  -I.  -MMD -I/home/cotton/.local/bin/oss-cad-suite/share/verilator/include -I/home/cotton/.local/bin/oss-cad-suite/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=0 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable      -c -o verilated_threads.o /home/cotton/.local/bin/oss-cad-suite/share/verilator/include/verilated_threads.cpp
+python3 /home/cotton/.local/bin/oss-cad-suite/share/verilator/bin/verilator_includer -DVL_INCLUDE_OPT=include Vtop.cpp Vtop___024root__DepSet_h84412442__0.cpp Vtop___024root__DepSet_heccd7ead__0.cpp Vtop_APB__Ad_D20__DepSet_hcdfe4426__0.cpp Vtop_APB__Ad_D20__DepSet_h00402e4b__0.cpp Vtop__Dpi.cpp Vtop__ConstPool_0.cpp Vtop___024root__Slow.cpp Vtop___024root__DepSet_h84412442__0__Slow.cpp Vtop___024root__DepSet_heccd7ead__0__Slow.cpp Vtop___024unit__Slow.cpp Vtop___024unit__DepSet_hff17caec__0__Slow.cpp Vtop_apb_pkg__Slow.cpp Vtop_apb_pkg__DepSet_hf6ad2277__0__Slow.cpp Vtop_APB__Ad_D20__Slow.cpp Vtop_APB__Ad_D20__DepSet_hcdfe4426__0__Slow.cpp Vtop__Syms.cpp > Vtop__ALL.cpp
+g++ -Os  -I.  -MMD -I/home/cotton/.local/bin/oss-cad-suite/share/verilator/include -I/home/cotton/.local/bin/oss-cad-suite/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=0 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable      -c -o Vtop__ALL.o Vtop__ALL.cpp
+echo "" > Vtop__ALL.verilator_deplist.tmp
+g++    verilator.o verilated.o verilated_dpi.o verilated_vpi.o verilated_threads.o Vtop__ALL.a   -Wl,-rpath,/home/cotton/code/ADIP-2nd-pretraining-assignments/.venv/lib/python3.12/site-packages/cocotb/libs -L/home/cotton/code/ADIP-2nd-pretraining-assignments/.venv/lib/python3.12/site-packages/cocotb/libs -lcocotbvpi_verilator  -pthread -lpthread -latomic   -o Vtop
+rm Vtop__ALL.verilator_deplist.tmp
+make[1]: Leaving directory '/home/cotton/code/ADIP-2nd-pretraining-assignments/deps/rvcore/tests/sim_build'
+rm -f results.xml
+MODULE=test_riscv_single TESTCASE=test_riscv_program TOPLEVEL=top_with_ram_sim TOPLEVEL_LANG=verilog \
+         sim_build/Vtop  -v  
+     -.--ns INFO     gpi                                ..mbed/gpi_embed.cpp:108  in set_program_name_in_venv        Using Python virtual environment interpreter at /home/cotton/code/ADIP-2nd-pretraining-assignments/.venv/bin/python
+     -.--ns INFO     gpi                                ../gpi/GpiCommon.cpp:101  in gpi_print_registered_impl       VPI registered
+     0.00ns INFO     cocotb                             Running on Verilator version 5.041 devel
+     0.00ns INFO     cocotb                             Running tests with cocotb v1.9.2 from /home/cotton/code/ADIP-2nd-pretraining-assignments/.venv/lib/python3.12/site-packages/cocotb
+     0.00ns INFO     cocotb                             Seeding Python random module with 1763469682
+/usr/lib/python3.12/argparse.py:2479: UserWarning: Do not expect file_or_dir in Namespace(keyword='', markexpr='', maxfail=0, confcutdir=None, noconftest=False, keepduplicates=False, collect_in_virtualenv=False, continue_on_collection_errors=False, importmode='prepend', basetemp=None, durations=None, durations_min=None, showfixtures=False, show_fixtures_per_test=False, version=0, plugins=[], disable_plugin_autoload=False, traceconfig=False, verbose=0, no_header=False, no_summary=False, fold_skipped=True, force_short_summary=False, reportchars='fE', disable_warnings=False, showlocals=False, tbstyle='auto', xfail_tb=False, showcapture='all', fulltrace=False, color='auto', code_highlight='yes', capture='no', runxfail=False, pastebin=None, assertmode='rewrite', xmlpath=None, junitprefix=None, doctestmodules=False, doctestreport='udiff', doctestglob=[], doctest_ignore_import_errors=False, doctest_continue_on_failure=False, last_failed_no_failures='all', stepwise=False, stepwise_skip=False, stepwise_reset=False, logger_disable=[], markers=False, strict_config=None, strict_markers=None, strict=None, pythonwarnings=None, collectonly=False, pyargs=False, ignore=None, ignore_glob=None, deselect=None, inifilename=None, rootdir=None, help=False, debug=None, override_ini=['python_files=*.py', 'python_files=*.py'], usepdb=False, usepdb_cls=None, trace=False, lf=False, failedfirst=False, newfirst=False, cacheshow=None, cacheclear=False, setuponly=False, setupshow=False, setupplan=False, log_level=None, log_format=None, log_date_format=None, log_cli_level=None, log_cli_format=None, log_cli_date_format=None, log_file=None, log_file_mode=None, log_file_level=None, log_file_format=None, log_file_date_format=None, log_auto_indent=None, file_or_dir=[])
+  warn('Do not expect %s in %s' % (action.dest, namespace))
+     0.00ns INFO     cocotb.regression                  Found test test_riscv_single.test_riscv_program
+     0.00ns INFO     cocotb.regression                  running test_riscv_program (1/1)
+                                                          Execute RISC-V test program and monitor tohost for completion
+     0.00ns INFO     cocotb.top_with_ram_sim            firmware.hex sections: []
+     0.00ns INFO     cocotb.top_with_ram_sim            ============================================================
+     0.00ns INFO     cocotb.top_with_ram_sim            RISC-V Test: rv32ui-p-add
+     0.00ns INFO     cocotb.top_with_ram_sim            tohost address: 0x00000480 (detected from firmware.hex)
+     0.00ns INFO     cocotb.top_with_ram_sim            ============================================================
+     0.00ns INFO     cocotb.top_with_ram_sim            firmware.hex exists, memory pre-loaded by $readmemh in RTL
+    90.00ns INFO     cocotb.top_with_ram_sim            Checking memory content after $readmemh...
+    90.00ns INFO     cocotb.top_with_ram_sim            IMEM[0] = 0x0480006f
+    90.00ns INFO     cocotb.top_with_ram_sim            IMEM[1] = 0x34202f73
+    90.00ns INFO     cocotb.top_with_ram_sim            IMEM[2] = 0x00800f93
+    90.00ns INFO     cocotb.top_with_ram_sim            Reset released, starting execution...
+    90.00ns INFO     cocotb.top_with_ram_sim            Monitoring PC progression and memory access signals...
+   100.00ns INFO     cocotb.top_with_ram_sim              Cycle 1: PC = 0x00000000, State = 0
+   110.00ns INFO     cocotb.top_with_ram_sim              Cycle 2: PC = 0x00000000, State = 1
+   110.00ns INFO     cocotb.top_with_ram_sim              Cycle 2: IMEM READ addr=0x00000000, rready=1, rvalid=0
+   120.00ns INFO     cocotb.top_with_ram_sim              Cycle 3: PC = 0x00000000, State = 1
+   120.00ns INFO     cocotb.top_with_ram_sim              Cycle 3: IMEM READ addr=0x00000000, rready=1, rvalid=1
+   130.00ns INFO     cocotb.top_with_ram_sim              Cycle 4: PC = 0x00000000, State = 2
+   140.00ns INFO     cocotb.top_with_ram_sim              Cycle 5: PC = 0x00000048, State = 0
+   150.00ns INFO     cocotb.top_with_ram_sim              Cycle 6: PC = 0x00000048, State = 1
+   150.00ns INFO     cocotb.top_with_ram_sim              Cycle 6: IMEM READ addr=0x00000048, rready=1, rvalid=0
+   160.00ns INFO     cocotb.top_with_ram_sim              Cycle 7: PC = 0x00000048, State = 1
+   160.00ns INFO     cocotb.top_with_ram_sim              Cycle 7: IMEM READ addr=0x00000048, rready=1, rvalid=1
+   170.00ns INFO     cocotb.top_with_ram_sim              Cycle 8: PC = 0x00000048, State = 2
+   180.00ns INFO     cocotb.top_with_ram_sim              Cycle 9: PC = 0x0000004c, State = 0
+   190.00ns INFO     cocotb.top_with_ram_sim              Cycle 10: PC = 0x0000004c, State = 1
+   190.00ns INFO     cocotb.top_with_ram_sim              Cycle 10: IMEM READ addr=0x0000004c, rready=1, rvalid=0
+   200.00ns INFO     cocotb.top_with_ram_sim              Cycle 11: PC = 0x0000004c, State = 1
+   200.00ns INFO     cocotb.top_with_ram_sim              Cycle 11: IMEM READ addr=0x0000004c, rready=1, rvalid=1
+   230.00ns INFO     cocotb.top_with_ram_sim              Cycle 14: IMEM READ addr=0x00000050, rready=1, rvalid=0
+   240.00ns INFO     cocotb.top_with_ram_sim              Cycle 15: IMEM READ addr=0x00000050, rready=1, rvalid=1
+   250.00ns INFO     cocotb.top_with_ram_sim              Cycle 16: PC = 0x00000050, State = 2
+   270.00ns INFO     cocotb.top_with_ram_sim              Cycle 18: IMEM READ addr=0x00000054, rready=1, rvalid=0
+   280.00ns INFO     cocotb.top_with_ram_sim              Cycle 19: IMEM READ addr=0x00000054, rready=1, rvalid=1
+   300.00ns INFO     cocotb.top_with_ram_sim              Cycle 21: PC = 0x00000058, State = 0
+   350.00ns INFO     cocotb.top_with_ram_sim              Cycle 26: PC = 0x0000005c, State = 1
+   400.00ns INFO     cocotb.top_with_ram_sim              Cycle 31: PC = 0x00000060, State = 1
+   450.00ns INFO     cocotb.top_with_ram_sim              Cycle 36: PC = 0x00000064, State = 2
+   500.00ns INFO     cocotb.top_with_ram_sim              Cycle 41: PC = 0x0000006c, State = 0
+   550.00ns INFO     cocotb.top_with_ram_sim              Cycle 46: PC = 0x00000070, State = 1
+   600.00ns INFO     cocotb.top_with_ram_sim              Cycle 51: PC = 0x00000074, State = 1
+   650.00ns INFO     cocotb.top_with_ram_sim              Cycle 56: PC = 0x00000078, State = 2
+   700.00ns INFO     cocotb.top_with_ram_sim              Cycle 61: PC = 0x00000080, State = 0
+   750.00ns INFO     cocotb.top_with_ram_sim              Cycle 66: PC = 0x00000084, State = 1
+   800.00ns INFO     cocotb.top_with_ram_sim              Cycle 71: PC = 0x00000088, State = 1
+   850.00ns INFO     cocotb.top_with_ram_sim              Cycle 76: PC = 0x0000008c, State = 2
+   900.00ns INFO     cocotb.top_with_ram_sim              Cycle 81: PC = 0x00000094, State = 0
+   950.00ns INFO     cocotb.top_with_ram_sim              Cycle 86: PC = 0x00000098, State = 1
+  1000.00ns INFO     cocotb.top_with_ram_sim              Cycle 91: PC = 0x0000009c, State = 1
+  1050.00ns INFO     cocotb.top_with_ram_sim              Cycle 96: PC = 0x000000a0, State = 2
+  1090.00ns INFO     cocotb.top_with_ram_sim            Primary tohost address: 0x00000480
+  1090.00ns INFO     cocotb.top_with_ram_sim            Also monitoring RTL tohost output register
+ 20440.00ns INFO     cocotb.top_with_ram_sim            tohost written at cycle 1935: 0x00000001
+ 20440.00ns INFO     cocotb.top_with_ram_sim            tohost write detected at cycle 1935: tohost = 1 (0x00000001)
+ 20440.00ns INFO     cocotb.top_with_ram_sim            ============================================================
+ 20440.00ns INFO     cocotb.top_with_ram_sim            RISC-V TEST PASSED after 1935 cycles
+ 20440.00ns INFO     cocotb.top_with_ram_sim            tohost = 1
+ 20440.00ns INFO     cocotb.top_with_ram_sim            ============================================================
+ 20440.00ns INFO     cocotb.regression                  test_riscv_program passed
+ 20440.00ns INFO     cocotb.regression                  **********************************************************************************************
+                                                        ** TEST                                  STATUS  SIM TIME (ns)  REAL TIME (s)  RATIO (ns/s) **
+                                                        **********************************************************************************************
+                                                        ** test_riscv_single.test_riscv_program   PASS       20440.00           0.29      70520.57  **
+                                                        **********************************************************************************************
+                                                        ** TESTS=1 PASS=1 FAIL=0 SKIP=0                      20440.00           0.35      58512.42  **
+                                                        **********************************************************************************************
+                                                        
+[IMEM] Attempting to load firmware.hex...
+[IMEM] Memory load complete. First 4 words:
+[IMEM]   mem[0] = 0x0480006f
+[IMEM]   mem[1] = 0x34202f73
+[IMEM]   mem[2] = 0x00800f93
+[IMEM]   mem[3] = 0x03ff0863
+[DMEM] Attempting to load firmware.hex...
+[DMEM] Memory load complete. First 4 words:
+[DMEM]   mem[0] = 0x0480006f
+[DMEM]   mem[1] = 0x34202f73
+[DMEM]   mem[2] = 0x00800f93
+[DMEM]   mem[3] = 0x03ff0863
+- :0: Verilog $finish
+
+Test rv32ui-p-add completed

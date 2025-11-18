@@ -104,15 +104,14 @@ def find_tohost_address(test_name):
     """Find tohost address from hex file
     
     The tohost address is typically in the second section of the hex file.
-    We scan the hex file for @address directives.
+    We scan the original hex file for @address directives.
     """
-    hex_file = Path(__file__).parent / "firmware.hex"
-    
-    # Try to find tohost from firmware.hex (the actual loaded file)
-    if hex_file.exists():
+    # Try to find from original hex file (byte format)
+    orig_hex_file = Path(__file__).parent / "riscv_test_hex" / f"{test_name}.hex"
+    if orig_hex_file.exists():
         try:
             addresses = []
-            with open(hex_file, 'r') as f:
+            with open(orig_hex_file, 'r') as f:
                 for line in f:
                     line = line.strip()
                     if line.startswith('@'):
@@ -213,42 +212,30 @@ async def test_riscv_program(dut):
     dut.o_cpu_apb_pready.value = 1  # APB ready by default
     dut.o_cpu_apb_prdata.value = 0
     dut.o_cpu_apb_pslverr.value = 0
-    dut.init_wen.value = 0
-    dut.init_addr.value = 0
-    dut.init_data.value = 0
     
-    # Hold reset
-    await ClockCycles(dut.clk, 10)
-    
-    # Load firmware from hex file
+    # Memory is pre-loaded via $readmemh("firmware.hex") in the RTL
+    # firmware.hex should be in word format (32-bit per line)
     hex_file = "firmware.hex"
     if not os.path.exists(hex_file):
         dut._log.error(f"Hex file not found: {hex_file}")
         assert False, f"Hex file not found: {hex_file}"
     
-    dut._log.info(f"Loading firmware from {hex_file}")
-    memory = load_hex_file(hex_file)
-    dut._log.info(f"Loaded {len(memory)} bytes")
+    dut._log.info(f"firmware.hex exists, memory pre-loaded by $readmemh in RTL")
     
-    # Initialize memory
-    await initialize_memory(dut, memory)
+    # Hold reset
+    await ClockCycles(dut.clk, 10)
     
-    # Debug: Dump first few memory locations and verify key data
-    dut._log.info("Memory initialization complete. Checking first instructions...")
+    # Debug: Check memory content after $readmemh
+    dut._log.info("Checking memory content after $readmemh...")
     try:
-        # Try to read PC value
-        pc_val = int(dut.cpu.pc.value) if hasattr(dut, 'cpu') else 0
-        dut._log.info(f"CPU PC after init: 0x{pc_val:08x}")
-        
-        # Check memory content at 0x450 (test data location)
-        if hasattr(dut, 'dmem_bram_inst') and hasattr(dut.dmem_bram_inst, 'mem'):
-            mem_0x450 = int(dut.dmem_bram_inst.mem[0x114].value)  # 0x450 >> 2 = 0x114
-            dut._log.info(f"DMEM[0x114] (addr 0x450) = 0x{mem_0x450:08x} (expected 0x0FF000FF)")
-        
-        # Also check IMEM for comparison
+        # Check IMEM for first few instructions
         if hasattr(dut, 'imem_bram_inst') and hasattr(dut.imem_bram_inst, 'mem'):
-            imem_0x450 = int(dut.imem_bram_inst.mem[0x114].value)  # Same address
-            dut._log.info(f"IMEM[0x114] (addr 0x450) = 0x{imem_0x450:08x} (should also be 0x0FF000FF)")
+            imem_0 = int(dut.imem_bram_inst.mem[0].value)
+            imem_1 = int(dut.imem_bram_inst.mem[1].value)
+            imem_2 = int(dut.imem_bram_inst.mem[2].value)
+            dut._log.info(f"IMEM[0] = 0x{imem_0:08x}")
+            dut._log.info(f"IMEM[1] = 0x{imem_1:08x}")
+            dut._log.info(f"IMEM[2] = 0x{imem_2:08x}")
     except Exception as e:
         dut._log.warning(f"Could not read memory: {e}")
     
@@ -257,22 +244,35 @@ async def test_riscv_program(dut):
     dut._log.info("Reset released, starting execution...")
     
     # Debug: Monitor PC and memory writes for first 100 cycles to see execution pattern
-    dut._log.info("Monitoring PC progression and memory writes...")
+    dut._log.info("Monitoring PC progression and memory access signals...")
     for i in range(100):
         await RisingEdge(dut.clk)
         try:
             pc_val = int(dut.cpu.pc.value) if hasattr(dut.cpu, 'pc') else 0
+            proc_state = int(dut.cpu.proc_state.value) if hasattr(dut.cpu, 'proc_state') else -1
+            
             if i < 10 or i % 5 == 0:  # Log first 10 and every 5th cycle
-                dut._log.info(f"  Cycle {i+1}: PC = 0x{pc_val:08x}")
+                dut._log.info(f"  Cycle {i+1}: PC = 0x{pc_val:08x}, State = {proc_state}")
             
             # Monitor ALL memory writes during startup
-            if hasattr(dut, 'dmem_wvalid') and hasattr(dut, 'dmem_addr') and hasattr(dut, 'dmem_wdata'):
-                dmem_wvalid = int(dut.dmem_wvalid.value)
+            if hasattr(dut, 'cpu_dmem_wvalid') and hasattr(dut, 'dmem_addr') and hasattr(dut, 'dmem_wdata'):
+                dmem_wvalid = int(dut.cpu_dmem_wvalid.value)
                 if dmem_wvalid != 0:
                     dmem_addr = int(dut.dmem_addr.value)
                     dmem_wdata = int(dut.dmem_wdata.value)
-                    dut._log.info(f"  Cycle {i+1}: MEM WRITE addr=0x{dmem_addr:08x}, data=0x{dmem_wdata:08x}, wvalid={dmem_wvalid}")
-        except:
+                    dmem_wready = int(dut.cpu_dmem_wready.value) if hasattr(dut, 'cpu_dmem_wready') else -1
+                    dut._log.info(f"  Cycle {i+1}: DMEM WRITE addr=0x{dmem_addr:08x}, data=0x{dmem_wdata:08x}, wvalid={dmem_wvalid}, wready={dmem_wready}")
+            
+            # Also monitor IMEM access
+            if hasattr(dut, 'cpu_imem_rready') and hasattr(dut, 'imem_addr'):
+                imem_rready = int(dut.cpu_imem_rready.value)
+                if imem_rready != 0 and i < 20:  # Log first 20 cycles of IMEM access
+                    imem_addr = int(dut.imem_addr.value)
+                    imem_rvalid = int(dut.cpu_imem_rvalid.value) if hasattr(dut, 'cpu_imem_rvalid') else -1
+                    dut._log.info(f"  Cycle {i+1}: IMEM READ addr=0x{imem_addr:08x}, rready={imem_rready}, rvalid={imem_rvalid}")
+        except Exception as e:
+            if i < 5:
+                dut._log.warning(f"  Cycle {i+1}: Error reading signals: {e}")
             pass
     
     # Monitor tohost register for test completion
@@ -285,15 +285,18 @@ async def test_riscv_program(dut):
     dut._log.info("Also monitoring RTL tohost output register")
     
     max_cycles = 200000
-    prev_tohost = 0
-    prev_gp_val = 0
     tohost_write_detected = False
     prev_pc = 0
     same_pc_count = 0
     
-    # Alternative: also check memory at tohost address
     # Calculate word address for memory access
     tohost_word_addr = tohost_addr >> 2
+    
+    # Wait for execution to start properly after reset
+    # The memory is pre-loaded via $readmemh, so no need to wait for initialization
+    
+    prev_tohost = 0
+    prev_gp_val = 0
     
     for cycle in range(max_cycles):
         await RisingEdge(dut.clk)
@@ -336,34 +339,37 @@ async def test_riscv_program(dut):
             pass
         
         # Check tohost register for test completion
-        # Method 1: Check RTL's tohost output register
+        # Monitor memory writes to the detected tohost address
         tohost_val = 0
+        
+        # Method 1: Check RTL's tohost register (may not match if TOHOST_ADDR is different)
         try:
             if hasattr(dut, 'tohost'):
-                tohost_val = int(dut.tohost.value)
-                
-                # Log any change in tohost value
-                if tohost_val != prev_tohost:
-                    dut._log.info(f"RTL tohost register changed at cycle {cycle + 1}: 0x{prev_tohost:08x} -> 0x{tohost_val:08x}")
+                rtl_tohost = int(dut.tohost.value)
+                if rtl_tohost != 0 and rtl_tohost != prev_tohost:
+                    tohost_val = rtl_tohost
+                    dut._log.info(f"RTL tohost register written at cycle {cycle + 1}: 0x{tohost_val:08x}")
         except (AttributeError, ValueError) as e:
             pass
         
-        # Method 2: If RTL tohost is still 0, try reading directly from memory
+        # Method 2: Monitor direct memory writes to detected tohost address
+        # This works regardless of RTL's TOHOST_ADDR parameter
         if tohost_val == 0:
             try:
-                if hasattr(dut, 'dmem_bram_inst') and hasattr(dut.dmem_bram_inst, 'mem'):
-                    if tohost_word_addr < 4096:  # Within DMEM range
-                        mem_tohost = int(dut.dmem_bram_inst.mem[tohost_word_addr].value)
-                        if mem_tohost != 0:
-                            tohost_val = mem_tohost
-                            if tohost_val != prev_tohost:
-                                dut._log.info(f"Memory tohost[0x{tohost_addr:08x}] changed at cycle {cycle + 1}: 0x{prev_tohost:08x} -> 0x{tohost_val:08x}")
-            except (AttributeError, ValueError, IndexError) as e:
+                if hasattr(dut, 'cpu_dmem_wvalid') and hasattr(dut, 'dmem_addr') and hasattr(dut, 'dmem_wdata'):
+                    dmem_wvalid = int(dut.cpu_dmem_wvalid.value)
+                    if dmem_wvalid != 0:
+                        dmem_addr = int(dut.dmem_addr.value)
+                        if dmem_addr == tohost_addr:
+                            dmem_wdata = int(dut.dmem_wdata.value)
+                            tohost_val = dmem_wdata
+                            dut._log.info(f"Memory write to tohost[0x{tohost_addr:08x}] at cycle {cycle + 1}: 0x{tohost_val:08x}")
+            except (AttributeError, ValueError) as e:
                 pass
         
-        # Check if test completed
+        # Check if test completed - only react to transitions from 0 to non-zero
         try:
-            if tohost_val != prev_tohost and tohost_val != 0:
+            if tohost_val != 0 and prev_tohost == 0:
                 if not tohost_write_detected:
                     dut._log.info(f"tohost write detected at cycle {cycle + 1}: tohost = {tohost_val} (0x{tohost_val:08x})")
                     tohost_write_detected = True
@@ -398,8 +404,9 @@ async def test_riscv_program(dut):
                     dut._log.error(f"CSR state: mtvec=0x{mtvec:08x}, mcause=0x{mcause:08x}, mepc=0x{mepc:08x}, mstatus=0x{mstatus:08x}")
                     dut._log.error("="*60)
                     assert False, f"Test '{test_name}' failed: test case #{test_case}"
-                
-                    prev_tohost = tohost_val
+            
+            # Update prev_tohost for next iteration
+            prev_tohost = tohost_val
         except (AttributeError, ValueError) as e:
             pass
         

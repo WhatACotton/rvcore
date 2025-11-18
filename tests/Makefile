@@ -28,9 +28,17 @@ RV32UM_BINS = $(filter-out %.dump, $(RV32UM_TESTS))
 RV32UI_HEXS = $(patsubst $(RISCV_TESTS)/%,$(HEX_DIR)/%.hex,$(RV32UI_BINS))
 RV32UM_HEXS = $(patsubst $(RISCV_TESTS)/%,$(HEX_DIR)/%.hex,$(RV32UM_BINS))
 
-# RTL source files
+# RTL source files (excluding top_with_gowin_IP.sv which requires Gowin IP)
 VERILOG_SOURCES = \
-	$(RTL_DIR)/*.sv \
+	$(RTL_DIR)/alu_module.sv \
+	$(RTL_DIR)/apb_arbiter.sv \
+	$(RTL_DIR)/cf_math_pkg.sv \
+	$(RTL_DIR)/clint.sv \
+	$(RTL_DIR)/decoder_module.sv \
+	$(RTL_DIR)/rvcore_simple.sv \
+	$(RTL_DIR)/top_with_ram_sim.sv \
+	$(RTL_DIR)/trigger_module_comb.sv \
+	$(RTL_DIR)/trigger_module.sv \
 	$(RTL_DIR)/*.vh \
 	$(RTL_DIR)/*.svh \
 	$(DEPS_DIR)/apb/src/apb_pkg.sv \
@@ -74,8 +82,8 @@ COMPILE_ARGS += -DDEBUG_AREA_END=32\'h00001000
 # Module parameters for RISC-V tests
 # Tests start at 0x00000000 with custom linker script
 COMPILE_ARGS += -GSTART_ADDR=32\'h00000000
-# tohost is at 0x00000480 (standard RISC-V test location for -p virtual tests)
-COMPILE_ARGS += -GTOHOST_ADDR=32\'h00000480
+# tohost address detected from test binaries (typically 0x6C0 for riscv-tests)
+COMPILE_ARGS += -GTOHOST_ADDR=32\'h000006C0
 # UART base address (default: 0x100 in APB space)
 UART_BASE ?= 32\'h00000100
 UART_MASK ?= 32\'h00000FF0

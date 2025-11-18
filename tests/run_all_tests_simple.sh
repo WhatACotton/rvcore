@@ -57,8 +57,9 @@ for test_hex in "${TESTS[@]}"; do
     echo ""
     echo -e "${BLUE}[${CURRENT}/${TOTAL}]${NC} Testing: ${test_name}"
     
-    # Copy hex file to firmware.hex
-    cp "$test_hex" firmware.hex
+    # Convert hex file to word format for $readmemh
+    # The RISC-V test hex files are byte-oriented, but $readmemh expects 32-bit words
+    python3 convert_hex_to_words.py "$test_hex" firmware.hex > /dev/null 2>&1
     
     # Export TEST_NAME for cocotb
     export TEST_NAME="$test_name"

@@ -21,8 +21,15 @@ export PYTHONPATH := $(PROJECT_ROOT)/common:$(PYTHONPATH)
 # Source files - complete top module with all dependencies
 # Note: JTAG DTM tests are in ../top_jtag directory
 VERILOG_SOURCES = \
-	$(RTL_DIR)/*.sv \
-	$(RTL_DIR)/*.vh \
+	$(RTL_DIR)/alu_module.sv \
+	$(RTL_DIR)/apb_arbiter.sv \
+	$(RTL_DIR)/cf_math_pkg.sv \
+	$(RTL_DIR)/clint.sv \
+	$(RTL_DIR)/decoder_module.sv \
+	$(RTL_DIR)/rvcore_simple.sv \
+	$(RTL_DIR)/top_with_ram_sim.sv \
+	$(RTL_DIR)/trigger_module_comb.sv \
+	$(RTL_DIR)/trigger_module.sv \
 	$(RTL_DIR)/*.svh \
 	$(DEPS_DIR)/apb/src/apb_pkg.sv \
 	$(DEPS_DIR)/apb/src/apb_intf.sv \
@@ -36,7 +43,7 @@ VERILOG_SOURCES = \
 # Include paths
 VERILOG_INCLUDE_DIRS = \
 	$(RTL_DIR) \
-	$(RTL_DIR)/core \
+	$(RTL_DIR)/rtl/core \
 	$(DEPS_DIR)/apb/src \
 	$(DEPS_DIR)/apb/include
 

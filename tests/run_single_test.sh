@@ -12,6 +12,8 @@ if [ $# -ne 1 ]; then
 fi
 
 TEST_NAME="$1"
+HEX_DIR="riscv_test_hex"
+HEX_FILE="${HEX_DIR}/${TEST_NAME}.hex"
 
 # Export TEST_NAME for cocotb to read
 export TEST_NAME
@@ -19,9 +21,10 @@ export TEST_NAME
 echo "Running test: ${TEST_NAME}"
 echo ""
 
-
-# Copy hex file to firmware.hex for cocotb
-cp "$HEX_FILE" firmware.hex
+# Convert hex file to word format for $readmemh
+# The RISC-V test hex files are byte-oriented, but $readmemh expects 32-bit words
+echo "Converting ${HEX_FILE} to firmware.hex (word format)"
+python3 convert_hex_to_words.py "$HEX_FILE" firmware.hex
 
 # Clean up old results to force fresh run
 rm -f results.xml
