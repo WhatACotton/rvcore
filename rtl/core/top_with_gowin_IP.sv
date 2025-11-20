@@ -1,6 +1,3 @@
-// Top-level module for simulation that maintains rvcore_dm_connector interface
-// This wraps the core with simple memory models for simulation testing
-
 `timescale 1ns / 1ps
 `include "dm_reg_addr.vh"
 
@@ -61,10 +58,6 @@ module top_with_ram_sim_gw #(
   // =================================================================
   //  Internal Memory - Gowin BRAM Implementation
   // =================================================================
-  // Use Gowin Block RAM primitives for synthesis
-  // Memory initialization is handled externally via init ports (Gowin IP)
-
-  // Gowin BRAM instantiation parameters
   localparam IMEM_DEPTH = 4000;  // 16KB / 4 bytes
   localparam DMEM_DEPTH = 4000;  // 16KB / 4 bytes
 
@@ -106,6 +99,17 @@ module top_with_ram_sim_gw #(
   logic [31:0] clint_prdata;
   logic        clint_pready;
   logic        clint_pslverr;
+  
+  // UART signals - internal APB interface (New, for direct access)
+  logic [ADDR_WIDTH-1:0] uart_paddr;
+  logic                  uart_psel;
+  logic                  uart_penable;
+  logic                  uart_pwrite;
+  logic [DATA_WIDTH-1:0] uart_pwdata;
+  logic [DATA_WIDTH-1:0] uart_prdata;
+  logic                  uart_pready;
+  logic                  uart_pslverr;
+
 
   // Core handshake signals
   logic        cpu_imem_rready;
@@ -115,7 +119,7 @@ module top_with_ram_sim_gw #(
   logic        cpu_dmem_wready;
   logic [ 1:0] cpu_dmem_wvalid;
 
-  // Debug and CLINT access detection
+  // Debug and CLINT Access detection
   logic        is_debug_rom_fetch;
   logic        is_dm_write;
   logic        is_dm_read;
@@ -124,25 +128,33 @@ module top_with_ram_sim_gw #(
   logic        is_clint_write;
   logic        is_clint_read;
 
+  // New: UART Access detection
+  logic        is_uart_access;
+  logic        is_uart_write;
+  logic        is_uart_read;
+
   // =================================================================
-  //  Debug and CLINT Access Detection
+  //  Debug, CLINT, and UART Access Detection
   // =================================================================
   assign is_debug_rom_fetch = debug_mode &&
          (imem_addr >= DEBUG_AREA_START) &&
          (imem_addr <= DEBUG_AREA_END);
 
-  assign is_dm_write = debug_mode && (cpu_dmem_wvalid != 2'b00) &&
-         (dmem_addr >= DEBUG_AREA_START) && (dmem_addr <= DEBUG_AREA_END);
-
   assign is_debug_data_access = debug_mode &&
          (dmem_addr >= DEBUG_AREA_START) &&
          (dmem_addr <= DEBUG_AREA_END);
 
+  assign is_dm_write = debug_mode && (cpu_dmem_wvalid != 2'b00) && is_debug_data_access;
   assign is_dm_read = debug_mode && cpu_dmem_rready && is_debug_data_access;
 
   assign is_clint_access = (dmem_addr >= CLINT_BASE) && (dmem_addr <= CLINT_END);
   assign is_clint_write = is_clint_access && (cpu_dmem_wvalid != 2'b00);
   assign is_clint_read = is_clint_access && cpu_dmem_rready;
+  
+  // New: UART detection - accessible in normal mode via dmem
+  assign is_uart_access = (dmem_addr >= UART_BASE_ADDR) && (dmem_addr <= UART_BASE_ADDR + 32'h0000000F);
+  assign is_uart_write = is_uart_access && (cpu_dmem_wvalid != 2'b00);
+  assign is_uart_read  = is_uart_access && cpu_dmem_rready;
 
   // =================================================================
   //  CLINT (Core-Local Interruptor) Instantiation
@@ -179,6 +191,40 @@ module top_with_ram_sim_gw #(
   end
 
   // =================================================================
+  //  UART APB Slave Instantiation (New Direct Access Logic)
+  // =================================================================
+  // UART APB signals - combinational for simple memory-mapped access
+  always_comb
+  begin
+    // UART APB Slave interface signals driven by core access
+    uart_psel    = is_uart_access && (is_uart_write || is_uart_read);
+    uart_penable = uart_psel; 
+    uart_pwrite  = is_uart_write;
+    // PADDR should be the full address for the APB UART module to decode internally
+    uart_paddr   = dmem_addr[ADDR_WIDTH-1:0]; 
+    uart_pwdata  = dmem_wdata;
+  end
+
+  // Instantiate UART
+  apb_uart_sv #(
+                .APB_ADDR_WIDTH(ADDR_WIDTH)
+              ) uart_inst (
+                .CLK    (clk),
+                .RSTN   (reset_n),
+                .PADDR  (uart_paddr),  // Driven by new logic
+                .PWDATA (uart_pwdata), // Driven by new logic
+                .PWRITE (uart_pwrite), // Driven by new logic
+                .PSEL   (uart_psel),   // Driven by new logic
+                .PENABLE(uart_penable), // Driven by new logic
+                .PRDATA (uart_prdata),
+                .PREADY (uart_pready),
+                .PSLVERR(uart_pslverr),
+                .rx_i   (uart_rx_i),
+                .tx_o   (uart_tx_o),
+                .event_o(uart_event_o)
+              );
+              
+  // =================================================================
   //  APB Arbiter for Debug Module Access
   // =================================================================
   // Internal APB interfaces
@@ -208,49 +254,17 @@ module top_with_ram_sim_gw #(
                 .slave_if  (arbiter_out_if.Master)
               );
 
-  // =================================================================
-  //  UART APB Slave
-  // =================================================================
-  logic        uart_psel;
-  logic [31:0] uart_prdata;
-  logic        uart_pready;
-  logic        uart_pslverr;
-
-  // Decode UART address range using parameters
-  assign uart_psel = arbiter_out_if.psel &&
-         ((arbiter_out_if.paddr & UART_ADDR_MASK[ADDR_WIDTH-1:0]) ==
-          UART_BASE_ADDR[ADDR_WIDTH-1:0]);
-
-  // Instantiate UART
-  apb_uart_sv #(
-                .APB_ADDR_WIDTH(ADDR_WIDTH)
-              ) uart_inst (
-                .CLK    (clk),
-                .RSTN   (reset_n),
-                .PADDR  (arbiter_out_if.paddr),
-                .PWDATA (arbiter_out_if.pwdata),
-                .PWRITE (arbiter_out_if.pwrite),
-                .PSEL   (uart_psel),
-                .PENABLE(arbiter_out_if.penable),
-                .PRDATA (uart_prdata),
-                .PREADY (uart_pready),
-                .PSLVERR(uart_pslverr),
-                .rx_i   (uart_rx_i),
-                .tx_o   (uart_tx_o),
-                .event_o(uart_event_o)
-              );
-
-  // Connect arbiter output to external APB interface or UART
+  // Connect arbiter output directly to external Debug Module APB interface
   assign i_cpu_apb_paddr        = arbiter_out_if.paddr;
-  assign i_cpu_apb_psel         = arbiter_out_if.psel && !uart_psel;
+  assign i_cpu_apb_psel         = arbiter_out_if.psel;
   assign i_cpu_apb_penable      = arbiter_out_if.penable;
   assign i_cpu_apb_pwrite       = arbiter_out_if.pwrite;
   assign i_cpu_apb_pwdata       = arbiter_out_if.pwdata;
 
-  // Mux response from UART or external APB
-  assign arbiter_out_if.pready  = uart_psel ? uart_pready : o_cpu_apb_pready;
-  assign arbiter_out_if.prdata  = uart_psel ? uart_prdata : o_cpu_apb_prdata;
-  assign arbiter_out_if.pslverr = uart_psel ? uart_pslverr : o_cpu_apb_pslverr;
+  // Connect external APB response back to arbiter
+  assign arbiter_out_if.pready  = o_cpu_apb_pready;
+  assign arbiter_out_if.prdata  = o_cpu_apb_prdata;
+  assign arbiter_out_if.pslverr = o_cpu_apb_pslverr;
 
   // =================================================================
   //  IMEM APB Master Logic (Debug ROM Access)
@@ -479,9 +493,12 @@ module top_with_ram_sim_gw #(
   logic dmem_rvalid_normal;
   logic dmem_rvalid_debug;
   logic dmem_rvalid_clint;
+  logic dmem_rvalid_uart; // New
+  
   logic dmem_wready_normal;
   logic dmem_wready_debug;
   logic dmem_wready_clint;
+  logic dmem_wready_uart; // New
 
   // IMEM valid signals
   always_ff @(posedge clk or negedge reset_n)
@@ -501,18 +518,25 @@ module top_with_ram_sim_gw #(
     if (!reset_n)
       dmem_rvalid_normal <= 1'b0;
     else
-      dmem_rvalid_normal <= cpu_dmem_rready && !is_debug_data_access && !is_clint_access;
+      // dmem_rvalid_normal is valid if it's not a peripheral or debug access
+      dmem_rvalid_normal <= cpu_dmem_rready && !is_debug_data_access && !is_clint_access && !is_uart_access;
   end
 
   assign dmem_rvalid_debug = (dmem_apb_state == DMEM_ACCESS && dmem_apb_if.pready && !dmem_transaction_write);
   assign dmem_rvalid_clint = is_clint_read && clint_pready;
-  assign cpu_dmem_rvalid = dmem_rvalid_normal || dmem_rvalid_debug || dmem_rvalid_clint;
+  assign dmem_rvalid_uart  = is_uart_read && uart_pready; // New
+  
+  assign cpu_dmem_rvalid = dmem_rvalid_normal || dmem_rvalid_debug || dmem_rvalid_clint || dmem_rvalid_uart;
 
   // DMEM write ready signals
-  assign dmem_wready_normal = !is_dm_write && !is_clint_access;
+  // dmem_wready_normal is ready if it's not a peripheral or debug access
+  assign dmem_wready_normal = !is_dm_write && !is_clint_access && !is_uart_access; 
+  
   assign dmem_wready_debug = (dmem_apb_state == DMEM_ACCESS && dmem_apb_if.pready && dmem_transaction_write);
   assign dmem_wready_clint = is_clint_write && clint_pready;
-  assign cpu_dmem_wready = dmem_wready_normal || dmem_wready_debug || dmem_wready_clint;
+  assign dmem_wready_uart  = is_uart_write && uart_pready; // New
+  
+  assign cpu_dmem_wready = dmem_wready_normal || dmem_wready_debug || dmem_wready_clint || dmem_wready_uart;
 
   // =================================================================
   //  APB Response Capture and Memory Data Muxing
@@ -567,7 +591,8 @@ module top_with_ram_sim_gw #(
   //  Gowin BRAM Instantiation for DMEM
   // =================================================================
   assign dmem_bram_addr = dmem_addr[13:2];  // Word address
-  assign dmem_bram_we   = (cpu_dmem_wvalid != 2'b00) && !is_dm_write && !is_clint_access && cpu_dmem_wready;
+  // DMEM BRAM write enable logic updated to exclude UART access
+  assign dmem_bram_we   = (cpu_dmem_wvalid != 2'b00) && !is_dm_write && !is_clint_access && !is_uart_access && cpu_dmem_wready;
 
   dmem_gowin_bram #(
                     .DEPTH     (DMEM_DEPTH),
@@ -576,7 +601,8 @@ module top_with_ram_sim_gw #(
                     .clk      (clk),
                     .reset_n  (reset_n),
                     .wr_en    (dmem_bram_we),
-                    .rd_en    (cpu_dmem_rready && !is_debug_data_access && !is_clint_access),
+                    // DMEM BRAM read enable logic updated to exclude UART access
+                    .rd_en    (cpu_dmem_rready && !is_debug_data_access && !is_clint_access && !is_uart_access), 
                     .addr     (dmem_bram_addr),
                     .wr_data  (dmem_wdata),
                     .rd_data  (dmem_bram_dout),
@@ -585,12 +611,12 @@ module top_with_ram_sim_gw #(
                     .init_data(32'b0)
                   );
 
+  // DMEM Read Data Muxing - Updated to include UART
   assign dmem_rdata = is_clint_access ? clint_prdata :
-         (is_debug_data_access ? dmem_apb_data : dmem_bram_dout);
+         (is_uart_access ? uart_prdata :
+         (is_debug_data_access ? dmem_apb_data : dmem_bram_dout));
 
   // Monitor tohost for RISC-V test support
-  // TOHOST_ADDR is now a module parameter (see module declaration)
-
   always_ff @(posedge clk or negedge reset_n)
   begin
     if (!reset_n)
@@ -658,7 +684,6 @@ module top_with_ram_sim_gw #(
   assign o_unavailable = 1'b0;  // Hart is always available
 
 endmodule
-
 
 // =================================================================
 //  Gowin BRAM Wrapper Modules
