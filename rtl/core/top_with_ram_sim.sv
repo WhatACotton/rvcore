@@ -692,11 +692,6 @@ module imem_gowin_bram #(
   // Use @address directive for non-contiguous sections
   initial
   begin
-    // First initialize all to NOPs
-    for (int i = 0; i < DEPTH; i++)
-    begin
-      mem[i] = 32'h00000013;  // NOP (addi x0, x0, 0)
-    end
     // Then load from specified file or default firmware.hex
     `ifndef SYNTHESIS
             if (INIT_FILE != "")
@@ -765,11 +760,6 @@ module dmem_gowin_bram #(
   // Use @address directive for non-contiguous sections
   initial
   begin
-    // First initialize all to NOPs
-    for (int i = 0; i < DEPTH; i++)
-    begin
-      mem[i] = 32'h00000013;  // NOP (addi x0, x0, 0)
-    end
     // Then load from specified file or default firmware.hex
     `ifndef SYNTHESIS
             if (INIT_FILE != "")
