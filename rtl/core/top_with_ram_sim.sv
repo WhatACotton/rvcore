@@ -38,6 +38,8 @@ module top_with_ram_sim #(
     output logic o_nonexistent,
     input  logic i_haltreq,
     input  logic i_resetreq,
+    input  logic i_dmactive,
+    input  logic [1:0] i_ext_resume_trigger,
     output logic o_hartreset,
     output logic o_unavailable,
 
@@ -68,7 +70,7 @@ module top_with_ram_sim #(
   localparam DMEM_DEPTH = 4096;  // 16KB / 4 bytes
 
   // IMEM signals for Gowin BRAM
-  logic [31:0] imem_bram_dout;
+  logic [31:0] imem_bram_dout /*synthesis syn_keep=1*/;
   logic [11:0] imem_bram_addr;  // 12-bit for 4K words
 
   // DMEM signals for Gowin BRAM
@@ -680,18 +682,19 @@ module imem_gowin_bram #(
     // Read port
     input  logic                  rd_en,
     input  logic [ADDR_WIDTH-1:0] rd_addr,
-    output logic [          31:0] rd_data
+    output logic [          31:0] rd_data /*synthesis syn_keep=1*/
   );
 
   // Inferred BRAM with proper attributes for Gowin
-  logic [31:0] mem         [DEPTH-1:0];
-  logic [31:0] rd_data_reg;
+  logic [31:0] mem         [DEPTH-1:0] /*synthesis syn_ramstyle="block_ram"*/;
+  logic [31:0] rd_data_reg /*synthesis syn_keep=1*/;
 
   // Initialize memory from file or firmware.hex
   // File should contain 32-bit words in hex format (one per line)
   // Use @address directive for non-contiguous sections
   initial
   begin
+ 
     // Then load from specified file or default firmware.hex
     `ifndef SYNTHESIS
             if (INIT_FILE != "")
