@@ -208,6 +208,7 @@ module core #(
   logic [  31:0]       mstatus;
   // Machine status register
   logic [  31:0]       mscratch;
+  logic [  31:0]       misa;
 
   // mstatus bit fields
   logic                mstatus_mie;
