@@ -1245,7 +1245,7 @@ module core #(
       mtvec        <= 32'd0;
       mcause       <= 32'd0;
       mepc         <= 32'd0;
-      mstatus      <= 32'd0;
+      mscratch      <= 32'd0;
       mstatus_mie  <= 1'b0;  // Interrupts disabled at reset
       mstatus_mpie <= 1'b0;
       mstatus_mpp  <= 2'b11;  // Previous privilege = M-mode
