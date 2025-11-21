@@ -960,6 +960,8 @@ module core #(
     case (csr_addr)
       `CSR_ADDR_MTVEC:
         csr_rdata = mtvec;
+      `CSR_ADDR_MISA:
+        csr_rdata = 32'h4000_0100;  // RV32I
       `CSR_ADDR_MCAUSE:
         csr_rdata = mcause;
       `CSR_ADDR_MEPC:

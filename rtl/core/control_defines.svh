@@ -74,6 +74,7 @@
 `define CSR_ADDR_MCAUSE 12'h342
 `define CSR_ADDR_MEPC 12'h341
 `define CSR_ADDR_MSTATUS 12'h300
+`define CSR_ADDR_MISA    12'h301
 `define CSR_ADDR_MIE 12'h304
 `define CSR_ADDR_MIP 12'h344
 
