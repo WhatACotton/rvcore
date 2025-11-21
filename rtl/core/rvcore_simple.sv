@@ -962,7 +962,7 @@ module core #(
       `CSR_ADDR_MTVEC:
         csr_rdata = mtvec;
       `CSR_ADDR_MISA:
-        csr_rdata = 32'h4000_0100;  // RV32I
+        csr_rdata = misa;
       `CSR_ADDR_MCAUSE:
         csr_rdata = mcause;
       `CSR_ADDR_MEPC:
@@ -1240,6 +1240,7 @@ module core #(
       end
 
       // Initialize M-Mode CSRs
+      misa         <= 32'h40001100;  // RV32I
       mtvec        <= 32'd0;
       mcause       <= 32'd0;
       mepc         <= 32'd0;
