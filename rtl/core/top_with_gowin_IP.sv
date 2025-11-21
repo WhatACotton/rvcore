@@ -10,8 +10,7 @@ module top_with_ram_sim_gw #(
     parameter bit [31:0] TOHOST_ADDR     = 32'h80001000,   // tohost address for tests
     parameter bit [31:0] UART_BASE_ADDR  = 32'h00000100,   // UART base address in APB space
     parameter bit [31:0] UART_ADDR_MASK  = 32'h00000FF0,   // UART address mask (16-byte region)
-    parameter string     IMEM_INIT_FILE  = "",            // Instruction memory initialization file
-    parameter string     DMEM_INIT_FILE  = ""             // Data memory initialization file
+    parameter string     IMEM_INIT_FILE  = ""            // Instruction memory initialization file
   ) (
     input logic clk,
     input logic reset_n,
@@ -529,8 +528,9 @@ module top_with_ram_sim_gw #(
   assign cpu_dmem_rvalid = dmem_rvalid_normal || dmem_rvalid_debug || dmem_rvalid_clint || dmem_rvalid_uart;
 
   // DMEM write ready signals
-  // dmem_wready_normal is ready if it's not a peripheral or debug access
-  assign dmem_wready_normal = !is_dm_write && !is_clint_access && !is_uart_access; 
+  // dmem_wready_normal is ready if it's not a peripheral or debug module register access
+  // Note: We allow writes in debug mode to normal memory (for progbuf execution)
+  assign dmem_wready_normal = !is_debug_data_access && !is_clint_access && !is_uart_access; 
   
   assign dmem_wready_debug = (dmem_apb_state == DMEM_ACCESS && dmem_apb_if.pready && dmem_transaction_write);
   assign dmem_wready_clint = is_clint_write && clint_pready;
@@ -571,19 +571,19 @@ module top_with_ram_sim_gw #(
   // =================================================================
   assign imem_bram_addr = imem_addr[13:2];  // Word address
 
-  imem_gowin_bram #(
-                    .DEPTH     (IMEM_DEPTH),
-                    .ADDR_WIDTH(12)
-                  ) imem_bram_inst (
-                    .clk    (clk),
-                    .reset_n(reset_n),
-                    .wr_en  (1'b0),
-                    .wr_addr(12'b0),
-                    .wr_data(32'b0),
-                    .rd_en  (cpu_imem_rready && !is_debug_rom_fetch),
-                    .rd_addr(imem_bram_addr),
-                    .rd_data(imem_bram_dout)
-                  );
+  // imem_gowin_bram #(
+  //                   .DEPTH     (IMEM_DEPTH),
+  //                   .ADDR_WIDTH(12)
+  //                 ) imem_bram_inst (
+  //                   .clk    (clk),
+  //                   .reset_n(reset_n),
+  //                   .wr_en  (1'b0),
+  //                   .wr_addr(12'b0),
+  //                   .wr_data(32'b0),
+  //                   .rd_en  (cpu_imem_rready && !is_debug_rom_fetch),
+  //                   .rd_addr(imem_bram_addr),
+  //                   .rd_data(imem_bram_dout)
+  //                 );
 
   assign imem_rdata = is_debug_rom_fetch ? imem_apb_data : imem_bram_dout;
 
@@ -591,26 +591,53 @@ module top_with_ram_sim_gw #(
   //  Gowin BRAM Instantiation for DMEM
   // =================================================================
   assign dmem_bram_addr = dmem_addr[13:2];  // Word address
-  // DMEM BRAM write enable logic updated to exclude UART access
-  assign dmem_bram_we   = (cpu_dmem_wvalid != 2'b00) && !is_dm_write && !is_clint_access && !is_uart_access && cpu_dmem_wready;
+  // DMEM BRAM write enable logic
+  // Write is enabled when:
+  // 1. CPU issues a valid write (cpu_dmem_wvalid != 2'b00)
+  // 2. Target is main memory (not CLINT or UART peripherals)
+  // 3. Not accessing debug module registers (is_debug_data_access)
+  // 4. Write ready is asserted (handshake complete)
+  // Note: We allow writes in debug mode to normal memory (for progbuf execution)
+  assign dmem_bram_we   = (cpu_dmem_wvalid != 2'b00) && !is_debug_data_access && !is_clint_access && !is_uart_access && dmem_wready_normal;
 
-  dmem_gowin_bram #(
-                    .DEPTH     (DMEM_DEPTH),
-                    .ADDR_WIDTH(12)
-                  ) dmem_bram_inst (
-                    .clk      (clk),
-                    .reset_n  (reset_n),
-                    .wr_en    (dmem_bram_we),
-                    // DMEM BRAM read enable logic updated to exclude UART access
-                    .rd_en    (cpu_dmem_rready && !is_debug_data_access && !is_clint_access && !is_uart_access), 
-                    .addr     (dmem_bram_addr),
-                    .wr_data  (dmem_wdata),
-                    .rd_data  (dmem_bram_dout),
-                    .init_wen (1'b0),
-                    .init_addr(12'b0),
-                    .init_data(32'b0)
-                  );
+  // dmem_gowin_bram #(
+  //                   .DEPTH     (DMEM_DEPTH),
+  //                   .ADDR_WIDTH(12)
+  //                 ) dmem_bram_inst (
+  //                   .clk      (clk),
+  //                   .reset_n  (reset_n),
+  //                   .wr_en    (dmem_bram_we),
+  //                   // DMEM BRAM read enable logic updated to exclude UART access
+  //                   .rd_en    (cpu_dmem_rready && !is_debug_data_access && !is_clint_access && !is_uart_access), 
+  //                   .addr     (dmem_bram_addr),
+  //                   .wr_data  (dmem_wdata),
+  //                   .rd_data  (dmem_bram_dout),
+  //                   .init_wen (1'b0),
+  //                   .init_addr(12'b0),
+  //                   .init_data(32'b0)
+  //                 );
 
+
+  // --- 追加: 統合メモリインスタンス ---
+  unified_gowin_bram #(
+    .DEPTH     (IMEM_DEPTH), // DMEM_DEPTHと同じである前提
+    .ADDR_WIDTH(12)
+  ) main_ram_inst (
+    .clk      (clk),
+    .reset_n  (reset_n),
+    
+    // IMEM Interface (Port A)
+    .imem_rd_en   (cpu_imem_rready && !is_debug_rom_fetch),
+    .imem_addr    (imem_bram_addr),
+    .imem_rd_data (imem_bram_dout),
+    
+    // DMEM Interface (Port B)
+    .dmem_wr_en   (dmem_bram_we),
+    .dmem_rd_en   (cpu_dmem_rready && !is_debug_data_access && !is_clint_access && !is_uart_access),
+    .dmem_addr    (dmem_bram_addr),
+    .dmem_wr_data (dmem_wdata),
+    .dmem_rd_data (dmem_bram_dout)
+  );
   // DMEM Read Data Muxing - Updated to include UART
   assign dmem_rdata = is_clint_access ? clint_prdata :
          (is_uart_access ? uart_prdata :
@@ -684,155 +711,55 @@ module top_with_ram_sim_gw #(
   assign o_unavailable = 1'b0;  // Hart is always available
 
 endmodule
-
-// =================================================================
-//  Gowin BRAM Wrapper Modules
-// =================================================================
-
 /*
- * IMEM Gowin BRAM - Simple Dual Port
- * Port A: Write (for initialization)
- * Port B: Read (for instruction fetch)
+ * Unified Gowin BRAM - True Dual Port
+ * Port A: IMEM (Instruction Fetch - Read Only)
+ * Port B: DMEM (Data Access - Read/Write)
  */
-/*
- * モジュール名: imem_gowin_bram
- *
- * 元の imem_gowin_bram.sv とIO互換性を持つラッパーモジュールです。
- * BRAM推論の代わりに、GowinのBRAM IPコア 'Gowin_DPB' を明示的にインスタンス化します。
- *
- * !!! 
- * 注意: Gowin IP Core Generatorで、以下の設定を持つ 'Gowin_DPB' という名前の
- * IPを生成し、プロジェクトに追加する必要があります。
- *
- * 1. Mode:           True Dual Port
- * 2. Port A (Write): Data Width = 32, Depth = 4096 (Address Width 12)
- * 3. Port B (Read):  Data Width = 32, Depth = 4096 (Address Width 12)
- * 4. Port B Read Mode: Pipeline (または Registered) <-- PA2122エラー回避に重要
- * 5. Port A Write Mode: Normal
- * !!!
- */
-module imem_gowin_bram #(
+module unified_gowin_bram #(
     parameter DEPTH      = 4096,
     parameter ADDR_WIDTH = 12
   ) (
     input  logic                     clk,
     input  logic                     reset_n,
-    // Write port (Port A of DPB) - for initialization
-    input  logic                     wr_en,
-    input  logic [ADDR_WIDTH-1:0]    wr_addr,
-    input  logic [31:0]              wr_data,
-    // Read port (Port B of DPB)
-    input  logic                     rd_en,
-    input  logic [ADDR_WIDTH-1:0]    rd_addr,
-    output logic [31:0]              rd_data
+    
+    // Port A: IMEM Access
+    input  logic                     imem_rd_en,
+    input  logic [ADDR_WIDTH-1:0]    imem_addr,
+    output logic [31:0]              imem_rd_data,
+    
+    // Port B: DMEM Access
+    input  logic                     dmem_wr_en,
+    input  logic                     dmem_rd_en,
+    input  logic [ADDR_WIDTH-1:0]    dmem_addr,
+    input  logic [31:0]              dmem_wr_data,
+    output logic [31:0]              dmem_rd_data
   );
 
-  // GowinのBRAMプリミティブは通常アクティブハイリセットを使います。
-  // 元のモジュールはアクティブロー (reset_n) なので、反転させます。
   logic active_reset;
   assign active_reset = ~reset_n;
 
-  // Gowin_DPB IPコアのインスタンス化
+  // Gowin_DPB IPコア (True Dual Port Mode)
   Gowin_DPB u_bram (
-              // Port A (書き込みポートとして使用)
-              .clka   (clk),
-              .reseta (active_reset),
-              .cea    (wr_en),        // 書き込み時のみクロックイネーブル
-              .ocea   (1'b0),         // Port A の出力は使わない
-              .wrea   (wr_en),        // 書き込みイネーブル
-              .ada    (wr_addr),
-              .dina   (wr_data),
-              .douta  (),             // Port A の出力は未接続
+    // Port A: IMEM (Read Only)
+    .clka   (clk),
+    .reseta (active_reset),
+    .cea    (imem_rd_en),
+    .ocea   (imem_rd_en),
+    .wrea   (1'b0),          // Write Disabled
+    .ada    (imem_addr),
+    .dina   (32'b0),
+    .douta  (imem_rd_data),
 
-              // Port B (読み取りポートとして使用)
-              .clkb   (clk),
-              .resetb (active_reset),
-              .ceb    (rd_en),        // 読み取り時のみクロックイネーブル
-              .oceb   (rd_en),        // 出力レジスタのクロックイネーブル
-              .wreb   (1'b0),         // Port B は書き込みしない
-              .adb    (rd_addr),
-              .dinb   (32'b0),        // Port B の入力は使わない
-              .doutb  (rd_data)       // BRAMのレジスタ出力を直接rd_dataに接続
-            );
-
-  // 元のコードにあった 'rd_data_reg' は不要になります。
-  // なぜなら、IPコアを「Pipeline (Registered) Read」モードで生成することにより、
-  // 'doutb' ポート自体がBRAM内部のレジスタ出力になるためです。
-  // これにより、余分なロジックが削減され、タイミングが改善し、
-  // サポートされていない読み取りモード（エラーの原因）を回避できます。
-
-endmodule
-
-
-/*
- * DMEM Gowin BRAM - True Dual Port
- * Port A: Read/Write (for data access)
- * Port B: Write only (for initialization)
- */
-/*
- * モジュール名: dmem_gowin_bram
- *
- * 元の dmem_gowin_bram.sv とIO互換性を持つラッパーモジュールです。
- * BRAM推論の代わりに、GowinのBRAM IPコア 'Gowin_DPB' を明示的にインスタンス化します。
- *
- * !!! 
- * 注意: Gowin IP Core Generatorで、以下の設定を持つ 'Gowin_DPB' という名前の
- * IPを生成し、プロジェクトに追加する必要があります。
- *
- * 1. Mode:           True Dual Port
- * 2. Port A (R/W):   Data Width = 32, Depth = 4096 (Address Width 12)
- * 3. Port B (Write): Data Width = 32, Depth = 4096 (Address Width 12)
- * 4. Port A Read Mode: Pipeline (または Registered) <-- PA2122エラー回避に重要
- * 5. Port A Write Mode: Normal (または Write-Through)
- * 6. Port B Write Mode: Normal
- * !!!
- */
-module dmem_gowin_bram #(
-    parameter DEPTH      = 4096,
-    parameter ADDR_WIDTH = 12
-  ) (
-    input  logic                     clk,
-    input  logic                     reset_n,
-    // Port A: Main data access (R/W)
-    input  logic                     wr_en,
-    input  logic                     rd_en,
-    input  logic [ADDR_WIDTH-1:0]    addr,
-    input  logic [31:0]              wr_data,
-    output logic [31:0]              rd_data,
-    // Port B: Initialization (Write-Only)
-    input  logic                     init_wen,
-    input  logic [ADDR_WIDTH-1:0]    init_addr,
-    input  logic [31:0]              init_data
+    // Port B: DMEM (Read/Write)
+    .clkb   (clk),
+    .resetb (active_reset),
+    .ceb    (dmem_wr_en || dmem_rd_en),
+    .oceb   (dmem_rd_en),
+    .wreb   (dmem_wr_en),
+    .adb    (dmem_addr),
+    .dinb   (dmem_wr_data),
+    .doutb  (dmem_rd_data)
   );
-
-  // GowinのBRAMプリミティブは通常アクティブハイリセットを使います。
-  logic active_reset;
-  assign active_reset = ~reset_n;
-
-  // Gowin_DPB IPコアのインスタンス化
-  Gowin_DPB u_bram (
-              // Port A (メインのR/Wポートとして使用)
-              .clka   (clk),
-              .reseta (active_reset),
-              .cea    (wr_en || rd_en), // 読み書き時
-              .ocea   (rd_en),          // 出力レジスタのクロックイネーブル
-              .wrea   (wr_en),          // 書き込みイネーブル
-              .ada    (addr),
-              .dina   (wr_data),
-              .douta  (rd_data),        // BRAMのレジスタ出力を直接rd_dataに接続
-
-              // Port B (初期化用の書き込み専用ポートとして使用)
-              .clkb   (clk),
-              .resetb (active_reset),
-              .ceb    (init_wen),       // 初期化書き込み時
-              .oceb   (1'b0),           // Port B の出力は使わない
-              .wreb   (init_wen),       // 書き込みイネーブル
-              .adb    (init_addr),
-              .dinb   (init_data),
-              .doutb  ()                // Port B の出力は未接続
-            );
-
-  // imemと同様に、'rd_data_reg' はBRAM IP内部の
-  // パイプラインレジスタで置き換えられます。
 
 endmodule
