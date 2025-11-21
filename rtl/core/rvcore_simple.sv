@@ -207,6 +207,7 @@ module core #(
   // Machine exception program counter
   logic [  31:0]       mstatus;
   // Machine status register
+  logic [  31:0]       mscratch;
 
   // mstatus bit fields
   logic                mstatus_mie;
@@ -968,6 +969,8 @@ module core #(
         csr_rdata = mepc;
       `CSR_ADDR_MSTATUS:
         csr_rdata = mstatus;
+      `CSR_ADDR_MSCRATCH:
+        csr_rdata = mscratch;
       `CSR_ADDR_DCSR:
         csr_rdata = debug_mode ? dcsr : 32'd0;
       `CSR_ADDR_DPC:
@@ -1240,6 +1243,7 @@ module core #(
       mtvec        <= 32'd0;
       mcause       <= 32'd0;
       mepc         <= 32'd0;
+      mstatus      <= 32'd0;
       mstatus_mie  <= 1'b0;  // Interrupts disabled at reset
       mstatus_mpie <= 1'b0;
       mstatus_mpp  <= 2'b11;  // Previous privilege = M-mode
