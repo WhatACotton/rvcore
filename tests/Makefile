@@ -117,7 +117,12 @@ prepare-hex-rv32um: $(RV32UM_HEXS)
 
 # IMPORTANT: Do NOT call these targets from scripts - they trigger cocotb
 # Include cocotb makefiles LAST to avoid interference
+# Only include if no goals are specified or if running make directly without wrapper targets
+ifneq ($(MAKECMDGOALS),)
+ifeq ($(filter sim-rv32ui sim-rv32um test test-rv32ui test-rv32um test-single prepare-hex prepare-hex-rv32ui prepare-hex-rv32um clean-local clean-hex clean-all list-tests help,$(MAKECMDGOALS)),)
 include $(shell cocotb-config --makefiles)/Makefile.sim
+endif
+endif
 
 # Wrapper targets that bypass cocotb's default behavior
 .PHONY: sim-single sim-rv32ui sim-rv32um

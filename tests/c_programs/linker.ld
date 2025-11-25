@@ -5,7 +5,7 @@ ENTRY(_start)
 
 MEMORY
 {
-    RAM (rwx) : ORIGIN = 0x00000000, LENGTH = 1M
+    RAM (rwx) : ORIGIN = 0x00010000, LENGTH = 0x00004000
 }
 
 SECTIONS
@@ -30,4 +30,8 @@ SECTIONS
     } > RAM
     
     _end = .;
+
+    /* Define stack top at end of RAM (one past last valid byte) */
+    _stack = ORIGIN(RAM) + LENGTH(RAM);
+    PROVIDE(__stack_top = _stack);
 }

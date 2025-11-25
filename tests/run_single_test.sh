@@ -36,3 +36,4 @@ make -f Makefile results.xml MODULE=test_riscv_single TESTCASE=test_riscv_progra
 
 echo ""
 echo "Test ${TEST_NAME} completed"
+rm -f firmware.hex

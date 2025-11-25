@@ -657,8 +657,19 @@ module top_with_ram_sim_gw #(
   end
 
   // Debug: Monitor CPU reset signal for Hart 1
+  // Register incoming reset request to break long combinational paths
+  // and reduce fanout on the i_resetreq net.
+  logic i_resetreq_sync;
+  always_ff @(posedge clk or negedge reset_n) begin
+    if (!reset_n) begin
+      i_resetreq_sync <= 1'b0;
+    end else begin
+      i_resetreq_sync <= i_resetreq;
+    end
+  end
+
   logic cpu_reset_n;
-  assign cpu_reset_n = reset_n & ~i_resetreq;
+  assign cpu_reset_n = reset_n & ~i_resetreq_sync;
 
 
   // =================================================================
@@ -706,7 +717,7 @@ module top_with_ram_sim_gw #(
 
 
   // Debug module interface
-  assign o_hartreset   = i_resetreq;
+  assign o_hartreset   = i_resetreq_sync;
   assign o_nonexistent = 1'b0;  // Hart exists
   assign o_unavailable = 1'b0;  // Hart is always available
 

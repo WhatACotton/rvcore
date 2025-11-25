@@ -5,12 +5,10 @@
     .type _start, @function
 
 _start:
-    /* Initialize stack pointer (if needed) */
-    /* For our simple CPU, we may not use stack */
-    
-    /* Zero out x0-x31 registers (x0 is hardwired to 0) */
-    addi x1, x0, 0
-    addi x2, x0, 0
+    /* Initialize stack pointer from linker-provided symbol */
+    la sp, __stack_top
+
+    /* Zero out other caller-saved registers (x1 was set by la above) */
     addi x3, x0, 0
     addi x4, x0, 0
     addi x5, x0, 0

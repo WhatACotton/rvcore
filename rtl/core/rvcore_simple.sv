@@ -226,6 +226,9 @@ module core #(
   logic [31:0] dpc;
   // Debug Program Counter
   logic        debug_mode;
+  // Pending halt request: remember if a halt request arrived while not in debug mode
+  // and keep it asserted until the core actually enters debug mode.
+  logic        haltreq_pending;
   // CPU is in debug mode
 
   // dcsr bit fields (simplified - key fields only)
@@ -1254,10 +1257,11 @@ module core #(
       dcsr_cause   <= 3'd0;
       dcsr_step    <= 1'b0;
       dcsr_prv     <= 2'b11;  // M-mode
-      debug_mode   <= 1'b0;   // Always start in normal mode
-      dpc          <= 32'd0;
-      dscratch0    <= 32'd0;
-      dscratch1    <= 32'd0;
+      debug_mode      <= 1'b0;   // Always start in normal mode
+      dpc             <= 32'd0;
+      dscratch0       <= 32'd0;
+      dscratch1       <= 32'd0;
+      haltreq_pending <= 1'b0;
 
       // Initialize Hart ID
       mhartid      <= HART_ID;
@@ -1281,6 +1285,16 @@ module core #(
     end
     else  // Normal operation
     begin
+      // ========================================================================
+      // Latch halt request immediately when received
+      // This makes the signal sticky so core can observe it even if DM deasserts
+      // ========================================================================
+      if (i_haltreq && !debug_mode)
+      begin
+        haltreq_pending <= 1'b1;
+      end
+      // Clear haltreq_pending when entering debug mode (handled in PC UPDATE below)
+
       // ========================================================================
       // Register File and CSR Writes - Execute every cycle (not gated by stall)
       // This ensures instructions complete their writeback even during APB waits
@@ -1417,31 +1431,41 @@ module core #(
         mstatus_mpie <= mstatus_mie;
         mstatus_mie  <= 1'b0;
         mstatus_mpp  <= 2'b11;
-      end  // Trigger debug mode entry has second priority (action=1)
-      else if (trigger_fire && !debug_mode)
+      end
+      // Trigger debug mode entry has second priority (action=1)
+      else if (trigger_fire && !debug_mode && instruction_retired)
       begin
-        // Enter debug mode due to trigger
-        debug_mode <= 1'b1;
-        dcsr_cause <= `DEBUG_CAUSE_TRIGGER;  // cause = 2 (trigger)
-        dcsr_prv   <= 2'b11;  // M-mode
+        // Enter debug mode due to trigger (ensure retiring instruction)
+        debug_mode      <= 1'b1;
+        haltreq_pending <= 1'b0;  // Clear any pending halt request
+        dcsr_cause      <= `DEBUG_CAUSE_TRIGGER;  // cause = 2 (trigger)
+        dcsr_prv        <= 2'b11;  // M-mode
         // Save PC of triggering instruction
         dpc        <= inst_pc;
         // Jump to Debug ROM entry point
         pc         <= `DEBUG_ENTRY_POINT;
-      end  // Debug halt request has third priority
-      else if (i_haltreq && !debug_mode)
+      end
+      // Debug halt request has third priority - NO instruction_retired wait
+      else if (haltreq_pending && !debug_mode)
       begin
-        // Enter debug mode due to halt request
-        debug_mode <= 1'b1;
-        dcsr_cause <= `DEBUG_CAUSE_HALTREQ;  // cause = 3 (halt request)
-        dcsr_prv   <= 2'b11;
-        // M-mode
-        // Save PC of next instruction to be executed
-        dpc        <= pc;
-        // Jump to Debug ROM entry point
-        pc         <= `DEBUG_ENTRY_POINT;
-        // Debug ROM entry address
-      end  // DRET: Exit debug mode
+        debug_mode      <= 1'b1;
+        haltreq_pending <= 1'b0;  // Clear pending flag when entering debug mode
+        dcsr_cause      <= `DEBUG_CAUSE_HALTREQ;  // cause = 3 (halt request)
+        dcsr_prv        <= 2'b11;  // M-mode
+        
+        // Save appropriate PC based on current state
+        case (proc_state)
+          IMEM_DONE:
+            dpc <= inst_pc;  // Currently executing instruction
+          DMEM_READ, DMEM_WRITE, DMEM_DONE:
+            dpc <= inst_pc;  // Memory operation in progress
+          default:
+            dpc <= pc;       // Next instruction to fetch
+        endcase
+        
+        pc <= `DEBUG_ENTRY_POINT;
+      end
+      // DRET: Exit debug mode
       else if (
         `IS_DRET(inst)
         && debug_mode && instruction_retired)
@@ -1496,6 +1520,35 @@ module core #(
 
     end  // End of normal operation
   end
+
+  // ==========================================================================
+  // Debug simulation prints (optional - synthesis ignored)
+  // ==========================================================================
+  // synthesis translate_off
+  always_ff @(posedge clk)
+  begin
+    if (i_haltreq && !debug_mode)
+      $display("[DEBUG] Time=%0t: Halt request received (i_haltreq=1)", $time);
+    
+    if (haltreq_pending && !$past(haltreq_pending))
+      $display("[DEBUG] Time=%0t: haltreq_pending latched", $time);
+    
+    if (debug_mode && !$past(debug_mode))
+      $display("[DEBUG] Time=%0t: *** ENTERED DEBUG MODE *** cause=%0d, dpc=0x%h, pc=0x%h, state=%s", 
+               $time, dcsr_cause, dpc, pc, proc_state.name());
+    
+    if (!debug_mode && $past(debug_mode))
+      $display("[DEBUG] Time=%0t: *** EXITED DEBUG MODE *** resuming at pc=0x%h", $time, pc);
+    
+    if (haltreq_pending)
+      $display("[DEBUG] Time=%0t: haltreq_pending=1, debug_mode=%b, proc_state=%s, trigger_fire=%b, trigger_exception=%b", 
+               $time, debug_mode, proc_state.name(), trigger_fire, trigger_exception_req);
+    
+    // Check if halt request condition is met but not taken
+    if (haltreq_pending && !debug_mode && !trigger_fire && !trigger_exception_req)
+      $display("[DEBUG] Time=%0t: HALT CONDITION READY - should enter debug mode next cycle!", $time);
+  end
+  // synthesis translate_on
 
   // Exit signal
   assign exit = exit_flag;
