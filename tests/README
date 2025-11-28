@@ -1,0 +1,66 @@
+# RISC-V Core Test Suite
+
+Testing framework for the RISC-V core with BRAM (single-port) memory.
+
+## Prerequisites
+
+- Python 3.8+
+- riscv64-unknown-elf-gcc toolchain
+- Verilator 5.x
+- cocotb 1.9+
+
+## Setup
+
+1. Create and activate Python virtual environment:
+```bash
+python3 -m venv ../../../.venv
+source ../../../.venv/bin/activate
+pip install -r ../requirements.txt
+```
+
+2. Build RISC-V test binaries for BRAM (0x10000 base address):
+```bash
+make -f Makefile.bram rv32ui
+```
+
+This generates:
+- `riscv_tests_bram/*.hex` - Word-formatted hex files for BRAM $readmemh
+- `riscv_tests_bram/*.dis` - Disassembly files (used for tohost detection)
+- `riscv_tests_bram/*.dump` - Full objdump output
+
+## Running Tests
+
+### All RV32UI Tests (39 tests)
+```bash
+./run_all_rv32ui_tests.sh
+```
+
+### Debug Trigger Extended Tests (11 tests)
+```bash
+./run_sdtrig_extended_tests.sh
+```
+
+### Single Test
+```bash
+cp riscv_tests_bram/rv32ui-p-add.hex firmware.hex
+export TEST_NAME=rv32ui-p-add
+make -f Makefile results.xml MODULE=test_riscv_single TESTCASE=test_riscv_program
+```
+
+## Key Files
+
+- **Makefile.bram** - Builds RISC-V tests with custom linker script for BRAM
+- **convert_hex_to_words.py** - Converts byte-addressed hex to word-addressed format
+- **test_riscv_single.py** - Cocotb test that loads and runs RISC-V tests
+- **run_all_rv32ui_tests.sh** - Automated test runner for all RV32UI tests
+
+## Memory Map
+
+- **BRAM**: 0x10000 - 0x13FFF (16KB)
+- **tohost**: 0x106C0 (used by tests to signal pass/fail)
+
+## Notes
+
+- Tests use custom linker script: `../deps/riscv-tests/env/p/link_bram.ld`
+- Hex files must be in word format (32-bit per line, little-endian, no @directives)
+- BRAM arbiter handles single-port access with priority: DMEM write > DMEM read > IMEM read

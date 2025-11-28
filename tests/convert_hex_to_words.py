@@ -11,7 +11,7 @@ Usage: python3 convert_hex_to_words.py input.hex output.hex
 import sys
 import re
 
-def convert_hex_to_words(input_file, output_file):
+def convert_hex_to_words(input_file, output_file, base_addr=0x10000):
     """Convert byte-oriented hex to 32-bit word hex"""
     
     # Read all bytes with their addresses
@@ -82,21 +82,29 @@ def convert_hex_to_words(input_file, output_file):
             return
         
         # Start from first word address
-        prev_addr = None
-        for word_addr in sorted_addrs:
-            word_index = word_addr // 4  # Word index for $readmemh
+        # Convert all addresses to word indices relative to base_addr
+        # BRAM $readmemh expects continuous word indices starting from 0
+        # without @ directives
+        
+        # Calculate word index range
+        min_word_addr = sorted_addrs[0]
+        max_word_addr = sorted_addrs[-1]
+        
+        # Convert byte addresses to word indices (relative to base_addr)
+        min_word_index = (min_word_addr - base_addr) // 4 if min_word_addr >= base_addr else min_word_addr // 4
+        max_word_index = (max_word_addr - base_addr) // 4 if max_word_addr >= base_addr else max_word_addr // 4
+        
+        # Write all words, filling gaps with zeros
+        # Start from min_word_index, not 0, to avoid unnecessary padding
+        for word_index in range(min_word_index, max_word_index + 1):
+            # Convert word index back to byte address
+            byte_addr = base_addr + (word_index * 4)
             
-            # Emit @ directive if this is not contiguous or first entry
-            if prev_addr is None:
-                # Only emit @ directive if not starting at address 0
-                if word_index != 0:
-                    f.write(f"@{word_index:08x}\n")
-            elif word_addr != prev_addr + 4:
-                f.write(f"@{word_index:08x}\n")
-            
-            # Write word data
-            f.write(f"{words[word_addr]:08x}\n")
-            prev_addr = word_addr
+            if byte_addr in words:
+                f.write(f"{words[byte_addr]:08x}\n")
+            else:
+                # Fill gap with zero
+                f.write(f"00000000\n")
     
     print(f"Converted {len(memory)} bytes to {len(words)} words")
     print(f"Address range: 0x{min_addr:08x} - 0x{max_addr:08x}")

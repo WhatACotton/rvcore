@@ -125,25 +125,32 @@ def find_tohost_address(test_name):
         except Exception as e:
             pass
     
-    # Fallback: try disassembly file
-    dis_file = Path(__file__).parent / "riscv_test_hex" / f"{test_name}.dis"
-    if dis_file.exists():
-        try:
-            with open(dis_file, 'r') as f:
-                for line in f:
-                    if '<tohost>' in line:
-                        if '#' in line:
-                            parts = line.split('#')[1].strip().split()
-                            if len(parts) >= 1:
-                                addr_str = parts[0]
-                                return int(addr_str, 16)
-                        else:
-                            addr_str = line.split()[0]
-                            return int(addr_str, 16)
-        except:
-            pass
+    # Fallback: try disassembly file from multiple locations
+    search_paths = [
+        Path(__file__).parent / "riscv_test_hex" / f"{test_name}.dis",
+        Path(__file__).parent / "riscv_tests_bram" / f"{test_name}.dis",
+        Path(__file__).parent / f"{test_name}.dis",
+    ]
     
-    return 0x00000480  # Common RISC-V test default
+    for dis_file in search_paths:
+        if dis_file.exists():
+            try:
+                with open(dis_file, 'r') as f:
+                    for line in f:
+                        if '<tohost>' in line:
+                            if '#' in line:
+                                parts = line.split('#')[1].strip().split()
+                                if len(parts) >= 1:
+                                    addr_str = parts[0]
+                                    return int(addr_str, 16)
+                            else:
+                                addr_str = line.split()[0]
+                                return int(addr_str, 16)
+            except:
+                pass
+    
+    # Default for BRAM tests (at offset 0x6C0 from base 0x10000)
+    return 0x000106C0
 
 
 def find_fail_pass_addresses(test_name):
@@ -152,8 +159,20 @@ def find_fail_pass_addresses(test_name):
     Returns:
         tuple: (fail_addr, pass_addr) or (None, None) if not found
     """
-    dis_file = Path(__file__).parent / "riscv_test_hex" / f"{test_name}.dis"
-    if not dis_file.exists():
+    # Try multiple possible locations for .dis files
+    search_paths = [
+        Path(__file__).parent / "riscv_test_hex" / f"{test_name}.dis",
+        Path(__file__).parent / "riscv_tests_bram" / f"{test_name}.dis",
+        Path(__file__).parent / f"{test_name}.dis",
+    ]
+    
+    dis_file = None
+    for path in search_paths:
+        if path.exists():
+            dis_file = path
+            break
+    
+    if dis_file is None:
         return None, None
     
     fail_addr = None

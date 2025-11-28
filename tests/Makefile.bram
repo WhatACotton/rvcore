@@ -1,0 +1,137 @@
+# Makefile to rebuild RISC-V tests for BRAM at 0x10000
+# Based on riscv-tests/isa/Makefile but using custom linker script
+
+XLEN ?= 32
+
+src_dir := ../deps/riscv-tests/isa
+env_dir := ../deps/riscv-tests/env
+out_dir := riscv_tests_bram
+
+# Toolchain
+RISCV_PREFIX ?= riscv64-unknown-elf-
+RISCV_GCC ?= $(RISCV_PREFIX)gcc
+RISCV_GCC_OPTS ?= -static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles
+RISCV_OBJDUMP ?= $(RISCV_PREFIX)objdump --disassemble-all --disassemble-zeroes --section=.text --section=.text.startup --section=.text.init --section=.data
+RISCV_OBJCOPY ?= $(RISCV_PREFIX)objcopy
+
+# Use our custom linker script for BRAM at 0x10000
+LINK_SCRIPT := $(env_dir)/p/link_bram.ld
+
+# Test lists - only build RV32UI tests initially
+rv32ui_tests := \
+	rv32ui-p-add \
+	rv32ui-p-addi \
+	rv32ui-p-and \
+	rv32ui-p-andi \
+	rv32ui-p-auipc \
+	rv32ui-p-beq \
+	rv32ui-p-bge \
+	rv32ui-p-bgeu \
+	rv32ui-p-blt \
+	rv32ui-p-bltu \
+	rv32ui-p-bne \
+	rv32ui-p-fence_i \
+	rv32ui-p-jal \
+	rv32ui-p-jalr \
+	rv32ui-p-lb \
+	rv32ui-p-lbu \
+	rv32ui-p-lh \
+	rv32ui-p-lhu \
+	rv32ui-p-lui \
+	rv32ui-p-lw \
+	rv32ui-p-or \
+	rv32ui-p-ori \
+	rv32ui-p-sb \
+	rv32ui-p-sh \
+	rv32ui-p-simple \
+	rv32ui-p-sll \
+	rv32ui-p-slli \
+	rv32ui-p-slt \
+	rv32ui-p-slti \
+	rv32ui-p-sltiu \
+	rv32ui-p-sltu \
+	rv32ui-p-sra \
+	rv32ui-p-srai \
+	rv32ui-p-srl \
+	rv32ui-p-srli \
+	rv32ui-p-sub \
+	rv32ui-p-sw \
+	rv32ui-p-xor \
+	rv32ui-p-xori
+
+# Add RV32UM tests (multiply/divide)
+rv32um_tests := \
+	rv32um-p-div \
+	rv32um-p-divu \
+	rv32um-p-mul \
+	rv32um-p-mulh \
+	rv32um-p-mulhsu \
+	rv32um-p-mulhu \
+	rv32um-p-rem \
+	rv32um-p-remu
+
+all_tests := $(rv32ui_tests) $(rv32um_tests)
+
+# Targets
+tests_elf := $(addprefix $(out_dir)/, $(all_tests))
+tests_hex := $(addsuffix .hex, $(tests_elf))
+tests_dump := $(addsuffix .dump, $(tests_elf))
+
+.PHONY: all
+all: $(tests_elf) $(tests_hex) $(tests_dump)
+	@echo "Built $(words $(tests_elf)) test binaries for BRAM"
+
+.PHONY: rv32ui
+rv32ui: $(addprefix $(out_dir)/, $(rv32ui_tests)) $(addsuffix .hex, $(addprefix $(out_dir)/, $(rv32ui_tests)))
+	@echo "Built $(words $(rv32ui_tests)) RV32UI tests"
+
+.PHONY: rv32um
+rv32um: $(addprefix $(out_dir)/, $(rv32um_tests)) $(addsuffix .hex, $(addprefix $(out_dir)/, $(rv32um_tests)))
+	@echo "Built $(words $(rv32um_tests)) RV32UM tests"
+
+# Build rule for RV32UI tests
+$(out_dir)/rv32ui-p-%: $(src_dir)/rv32ui/%.S $(LINK_SCRIPT) | $(out_dir)
+	@echo "Building $@..."
+	$(RISCV_GCC) -march=rv32g -mabi=ilp32 $(RISCV_GCC_OPTS) \
+		-I$(env_dir)/p -I$(src_dir)/macros/scalar \
+		-T$(LINK_SCRIPT) $< -o $@
+
+# Build rule for RV32UM tests
+$(out_dir)/rv32um-p-%: $(src_dir)/rv32um/%.S $(LINK_SCRIPT) | $(out_dir)
+	@echo "Building $@..."
+	$(RISCV_GCC) -march=rv32g -mabi=ilp32 $(RISCV_GCC_OPTS) \
+		-I$(env_dir)/p -I$(src_dir)/macros/scalar \
+		-T$(LINK_SCRIPT) $< -o $@
+
+# Generate hex files (word format for BRAM)
+$(out_dir)/%.hex: $(out_dir)/% $(out_dir)/%.dump
+	@echo "Generating hex for $<..."
+	@$(RISCV_OBJCOPY) -O verilog $< $@.tmp
+	@python3 convert_hex_to_words.py $@.tmp $@
+	@rm -f $@.tmp
+
+# Generate disassembly (also creates .dis for tohost detection)
+$(out_dir)/%.dump: $(out_dir)/%
+	@echo "Generating disassembly for $<..."
+	@$(RISCV_OBJDUMP) $< > $@
+	@cp $@ $(out_dir)/$*.dis
+
+$(out_dir):
+	@mkdir -p $(out_dir)
+
+.PHONY: clean
+clean:
+	rm -rf $(out_dir)
+
+.PHONY: help
+help:
+	@echo "RISC-V Tests BRAM Rebuild Makefile"
+	@echo ""
+	@echo "Targets:"
+	@echo "  all         - Build all tests (RV32UI + RV32UM)"
+	@echo "  rv32ui      - Build only RV32UI tests"
+	@echo "  rv32um      - Build only RV32UM tests"
+	@echo "  clean       - Remove all built files"
+	@echo ""
+	@echo "Built files go to: $(out_dir)/"
+	@echo "Using linker script: $(LINK_SCRIPT)"

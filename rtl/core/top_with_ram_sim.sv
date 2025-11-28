@@ -1,11 +1,13 @@
 // Top-level module for simulation that maintains rvcore_dm_connector interface
-// This wraps the core with unified memory model for simulation testing and FPGA synthesis
+// This wraps the core with unified memory model for simulation testing
 
 `timescale 1ns / 1ps
 
+`include "dm_reg_addr.vh"
+
 module top_with_ram_sim #(
-    parameter int        START_ADDR     = 32'h00000000,
-    parameter int        MEM_SIZE       = 1024 * 1024,   // 1MB
+    parameter int        START_ADDR     = 32'h00010000,  // Core entry point (default: RAM base address)
+    parameter int        MEM_SIZE       = 1024 * 1024,   // 1MB (for compatibility, unused)
     parameter int        ADDR_WIDTH     = 13,
     parameter int        DATA_WIDTH     = 32,
     parameter int        HART_ID        = 0,             // Hart ID for debug output
@@ -63,10 +65,15 @@ module top_with_ram_sim #(
   );
 
   // =================================================================
-  //  Internal Memory Parameters
+  //  Internal Memory Parameters and Address Mapping
   // =================================================================
   localparam IMEM_DEPTH = 4096; // 16KB / 4 bytes
   localparam DMEM_DEPTH = 4096; // 16KB / 4 bytes
+  
+  // RAM Base Address - Fixed at 0x10000 (separate from Debug ROM area 0x200-0xFFF)
+  // This ensures Debug ROM and RAM do not overlap in the address space
+  localparam bit [31:0] RAM_BASE_ADDR = 32'h00010000;
+  localparam bit [31:0] RAM_END_ADDR  = RAM_BASE_ADDR + (IMEM_DEPTH * 4) - 1; // 0x13FFF
 
   // Memory signals
   logic [31:0] imem_bram_dout;
@@ -75,6 +82,10 @@ module top_with_ram_sim #(
   logic [31:0] dmem_bram_dout;
   logic [11:0] dmem_bram_addr;  // 12-bit for 4K words
   logic        dmem_bram_we;
+  
+  // Address range detection
+  logic        imem_in_ram_area;
+  logic        dmem_in_ram_area;
 
   // =================================================================
   //  Internal Signals for Core Interface
@@ -128,14 +139,43 @@ module top_with_ram_sim #(
   logic        is_uart_read;
 
   // =================================================================
+  //  Address Range Detection
+  // =================================================================
+  // Memory Map:
+  // - 0x200-0xFFF: Debug Module area (Progbuf, Debug ROM, FLAG) via APB
+  //   - 0x200-0x3FF: Debug ROM / Progbuf
+  //   - 0x400-0x7FF: FLAG area (Hart communication with Debug Module)
+  // - 0x10000-0x13FFF: Program RAM via BRAM
+  //
+  // In debug mode, all accesses to 0x200-0xFFF go through APB to Debug Module
+  // This includes FLAG area which is used for resume/halt signaling between harts
+  
+  // Address masking: use only lower 14 bits (16KB) to handle wrap-around
+  // This allows addresses like 0xffffff10 to map to RAM area
+  logic [13:0] imem_masked_addr;
+  logic [13:0] dmem_masked_addr;
+  assign imem_masked_addr = imem_addr[13:0];
+  assign dmem_masked_addr = dmem_addr[13:0];
+  
+  // RAM area only includes 0x10000-0x13FFF, NOT FLAG area (0x400-0x7FF)
+  // FLAG area must go through APB to Debug Module for resume/halt communication
+  assign imem_in_ram_area = ((imem_addr >= RAM_BASE_ADDR) && (imem_addr <= RAM_END_ADDR)) ||
+                             (imem_addr[31:14] == 18'h3FFFF); // Handle 0xFFFFxxxx range
+  assign dmem_in_ram_area = ((dmem_addr >= RAM_BASE_ADDR) && (dmem_addr <= RAM_END_ADDR)) ||
+                             (dmem_addr[31:14] == 18'h3FFFF); // Handle 0xFFFFxxxx range
+
+  // =================================================================
   //  Debug, CLINT, and UART Access Detection
   // =================================================================
+  // Debug ROM access detection: 
+  // - In debug mode, addresses 0x200-0xFFF go to Debug Module (Progbuf, Debug ROM)
+  // - This takes priority over RAM access
   assign is_debug_rom_fetch = debug_mode &&
          (imem_addr >= DEBUG_AREA_START) &&
          (imem_addr <= DEBUG_AREA_END);
 
   assign is_dm_write = debug_mode && (cpu_dmem_wvalid != 2'b00) &&
-         (dmem_addr >= DEBUG_AREA_START) && (dmem_addr <= DEBUG_AREA_END); // Corrected condition
+         (dmem_addr >= DEBUG_AREA_START) && (dmem_addr <= DEBUG_AREA_END);
 
   assign is_debug_data_access = debug_mode &&
          (dmem_addr >= DEBUG_AREA_START) &&
@@ -147,7 +187,7 @@ module top_with_ram_sim #(
   assign is_clint_write = is_clint_access && (cpu_dmem_wvalid != 2'b00);
   assign is_clint_read = is_clint_access && cpu_dmem_rready;
   
-  // New: UART detection - accessible in normal mode via dmem
+  // UART detection - accessible in normal mode via dmem
   assign is_uart_access = (dmem_addr >= UART_BASE_ADDR) && (dmem_addr <= UART_BASE_ADDR + 32'h0000000F);
   assign is_uart_write = is_uart_access && (cpu_dmem_wvalid != 2'b00);
   assign is_uart_read  = is_uart_access && cpu_dmem_rready;
@@ -508,41 +548,30 @@ module top_with_ram_sim #(
   logic dmem_wready_uart; // New
 
   // IMEM valid signals
-  always_ff @(posedge clk or negedge reset_n)
-  begin
-    if (!reset_n)
-      imem_rvalid_normal <= 1'b0;
-    else
-      imem_rvalid_normal <= cpu_imem_rready && !is_debug_rom_fetch;
-  end
+  // For single-port BRAM: use the valid signal from arbiter
+  assign imem_rvalid_normal = bram_imem_valid;
 
   assign imem_rvalid_debug = (imem_apb_state == IMEM_ACCESS && imem_apb_if.pready);
   assign cpu_imem_rvalid   = imem_rvalid_normal || imem_rvalid_debug;
 
   // DMEM read valid signals
-  always_ff @(posedge clk or negedge reset_n)
-  begin
-    if (!reset_n)
-      dmem_rvalid_normal <= 1'b0;
-    else
-      // dmem_rvalid_normal is valid if it's not a peripheral or debug access
-      dmem_rvalid_normal <= cpu_dmem_rready && !is_debug_data_access && !is_clint_access && !is_uart_access;
-  end
+  // For single-port BRAM: use the valid signal from arbiter
+  assign dmem_rvalid_normal = bram_dmem_valid && !dmem_bram_we;  // Valid for reads only
 
   assign dmem_rvalid_debug = (dmem_apb_state == DMEM_ACCESS && dmem_apb_if.pready && !dmem_transaction_write);
   assign dmem_rvalid_clint = is_clint_read && clint_pready;
-  assign dmem_rvalid_uart  = is_uart_read && uart_pready; // New
+  assign dmem_rvalid_uart  = is_uart_read && uart_pready;
   
   assign cpu_dmem_rvalid = dmem_rvalid_normal || dmem_rvalid_debug || dmem_rvalid_clint || dmem_rvalid_uart;
 
   // DMEM write ready signals
-  // dmem_wready_normal is ready if it's not a peripheral or debug module register access
-  // Note: We allow writes in debug mode to normal memory (for progbuf execution)
-  assign dmem_wready_normal = !is_debug_data_access && !is_clint_access && !is_uart_access; 
+  // For single-port BRAM: writes are always accepted immediately
+  // (no arbitration conflict for writes - they always win)
+  assign dmem_wready_normal = dmem_in_ram_area && !is_debug_data_access && !is_clint_access && !is_uart_access; 
   
   assign dmem_wready_debug = (dmem_apb_state == DMEM_ACCESS && dmem_apb_if.pready && dmem_transaction_write);
   assign dmem_wready_clint = is_clint_write && clint_pready;
-  assign dmem_wready_uart  = is_uart_write && uart_pready; // New
+  assign dmem_wready_uart  = is_uart_write && uart_pready;
   
   assign cpu_dmem_wready = dmem_wready_normal || dmem_wready_debug || dmem_wready_clint || dmem_wready_uart;
 
@@ -575,48 +604,123 @@ module top_with_ram_sim #(
   assign dmem_apb_data  = (dmem_apb_state == DMEM_ACCESS) ? dmem_apb_if.prdata : dmem_apb_resp_reg;
 
   // =================================================================
-  //  UNIFIED Memory Instantiation
-  //  Combines separate IMEM/DMEM into one module for GDB load compatibility
+  //  UNIFIED Memory Instantiation with Address Translation
+  //  RAM is mapped at 0x10000 - 0x13FFF
+  //  Physical BRAM address = Virtual address - 0x10000
   // =================================================================
   
-  // Word address mapping
-  assign imem_bram_addr = imem_addr[13:2];
-  assign dmem_bram_addr = dmem_addr[13:2];
+  // Address translation: Virtual (0x10000-0x13FFF) -> Physical (0x0000-0x3FFF)
+  // For 0xFFFFxxxx addresses, use lower 14 bits directly (wrap-around behavior)
+  logic [31:0] imem_phys_addr;
+  logic [31:0] dmem_phys_addr;
+  
+  assign imem_phys_addr = (imem_addr[31:14] == 18'h3FFFF) ? {18'h0, imem_addr[13:0]} : 
+                          (imem_addr - RAM_BASE_ADDR);
+  assign dmem_phys_addr = (dmem_addr[31:14] == 18'h3FFFF) ? {18'h0, dmem_addr[13:0]} : 
+                          (dmem_addr - RAM_BASE_ADDR);
+  
+  // Word address mapping - lower 14 bits give us 16KB address space
+  assign imem_bram_addr = imem_phys_addr[13:2];
+  assign dmem_bram_addr = dmem_phys_addr[13:2];
   
   // Write enable logic
   // DMEM write is enabled when:
   // 1. CPU issues a valid write (cpu_dmem_wvalid != 2'b00)
-  // 2. Target is main memory (not CLINT or UART peripherals)
+  // 2. Target is RAM area (dmem_in_ram_area)
   // 3. Not accessing debug module registers (is_debug_data_access)
+  // 4. Not accessing peripherals (CLINT, UART)
   // Note: We allow writes in debug mode to normal memory (for progbuf execution)
-  assign dmem_bram_we   = (cpu_dmem_wvalid != 2'b00) && !is_debug_data_access && !is_clint_access && !is_uart_access;
+  assign dmem_bram_we = (cpu_dmem_wvalid != 2'b00) && dmem_in_ram_area && 
+                        !is_debug_data_access && !is_clint_access && !is_uart_access;
 
+  // Single-port BRAM with arbiter - outputs valid signals
+  logic bram_imem_valid;
+  logic bram_dmem_valid;
+  
   unified_gowin_bram #(
     .DEPTH     (IMEM_DEPTH), 
-    .ADDR_WIDTH(12)
+    .ADDR_WIDTH(12),
+    .INIT_FILE (IMEM_INIT_FILE != "" ? IMEM_INIT_FILE : DMEM_INIT_FILE)
   ) main_ram_inst (
     .clk      (clk),
     .reset_n  (reset_n),
     
     // Port A: IMEM (Read Only)
-    .imem_rd_en   (cpu_imem_rready && !is_debug_rom_fetch),
-    .imem_addr    (imem_bram_addr),
-    .imem_rd_data (imem_bram_dout),
+    .imem_rd_en      (cpu_imem_rready && imem_in_ram_area && !is_debug_rom_fetch),
+    .imem_addr       (imem_bram_addr),
+    .imem_rd_data    (imem_bram_dout),
+    .imem_rd_valid   (bram_imem_valid),  // NEW: indicates when IMEM data is valid
     
     // Port B: DMEM (Read/Write)
-    .dmem_wr_en   (dmem_bram_we),
-    .dmem_rd_en   (cpu_dmem_rready && !is_debug_data_access && !is_clint_access && !is_uart_access),
-    .dmem_addr    (dmem_bram_addr),
-    .dmem_wr_data (dmem_wdata),
-    .dmem_rd_data (dmem_bram_dout)
+    .dmem_wr_en        (dmem_bram_we),
+    .dmem_rd_en        (cpu_dmem_rready && dmem_in_ram_area && !is_debug_data_access && !is_clint_access && !is_uart_access),
+    .dmem_addr         (dmem_bram_addr),
+    .dmem_wr_data      (dmem_wdata),
+    .dmem_rd_data      (dmem_bram_dout),
+    .dmem_access_valid (bram_dmem_valid)  // NEW: indicates when DMEM data/write is valid
   );
 
   // Read Data Muxing
-  assign imem_rdata = is_debug_rom_fetch ? imem_apb_data : imem_bram_dout;
+  // Priority: Debug ROM > CLINT > UART > RAM > Default (0x00000000)
+  assign imem_rdata = is_debug_rom_fetch ? imem_apb_data : 
+                      (imem_in_ram_area ? imem_bram_dout : 32'h00000000);
   
   assign dmem_rdata = is_clint_access ? clint_prdata :
-         (is_uart_access ? uart_prdata :
-         (is_debug_data_access ? dmem_apb_data : dmem_bram_dout));
+                      (is_uart_access ? uart_prdata :
+                      (is_debug_data_access ? dmem_apb_data : 
+                      (dmem_in_ram_area ? dmem_bram_dout : 32'h00000000)));
+
+`ifndef SYNTHESIS
+  // Debug monitoring for routing verification
+  always_ff @(posedge clk) begin
+    // Monitor Debug ROM routing (CRITICAL for halt/resume)
+    if (cpu_imem_rready && is_debug_rom_fetch) begin
+      $display("[DEBUG_ROM] Time=%t HART=%0d addr=0x%08h -> APB (Progbuf/Debug ROM)", 
+               $time, HART_ID, imem_addr);
+    end
+    
+    // Monitor RAM access
+    if (cpu_imem_rready && imem_in_ram_area) begin
+      $display("[IMEM_RAM] Time=%t HART=%0d virt=0x%08h phys=0x%08h bram_addr=0x%03h", 
+               $time, HART_ID, imem_addr, imem_phys_addr, imem_bram_addr);
+    end
+    
+    // Monitor debug data access
+    if ((cpu_dmem_wvalid != 2'b00 || cpu_dmem_rready) && is_debug_data_access) begin
+      $display("[DEBUG_DATA] Time=%t HART=%0d addr=0x%08h wr=%b rd=%b -> APB", 
+               $time, HART_ID, dmem_addr, (cpu_dmem_wvalid != 2'b00), cpu_dmem_rready);
+    end
+    
+    // Monitor RAM writes
+    if (cpu_dmem_wvalid != 2'b00 && dmem_in_ram_area) begin
+      $display("[DMEM_WR_RAM] Time=%t HART=%0d virt=0x%08h phys=0x%08h data=0x%08h bram_addr=0x%03h", 
+               $time, HART_ID, dmem_addr, dmem_phys_addr, dmem_wdata, dmem_bram_addr);
+    end
+    
+    // Monitor RAM reads
+    if (cpu_dmem_rready && dmem_in_ram_area) begin
+      $display("[DMEM_RD_RAM] Time=%t HART=%0d virt=0x%08h phys=0x%08h bram_addr=0x%03h", 
+               $time, HART_ID, dmem_addr, dmem_phys_addr, dmem_bram_addr);
+    end
+    
+    // Debug: Monitor DMEM read request conditions
+    if (cpu_dmem_rready && !dmem_in_ram_area) begin
+      $display("[DMEM_RD_DEBUG] Time=%t HART=%0d RREADY but NOT in RAM area! addr=0x%08h debug=%b clint=%b uart=%b", 
+               $time, HART_ID, dmem_addr, is_debug_data_access, is_clint_access, is_uart_access);
+    end
+    
+    // Debug: Monitor dmem_rvalid generation
+    if (cpu_dmem_rvalid) begin
+      $display("[DMEM_RVALID] Time=%t HART=%0d rvalid=1 data=0x%08h (normal=%b debug=%b clint=%b uart=%b)", 
+               $time, HART_ID, dmem_rdata, dmem_rvalid_normal, dmem_rvalid_debug, dmem_rvalid_clint, dmem_rvalid_uart);
+    end
+    
+    // Monitor when address is out of range (potential bug)
+    if (cpu_imem_rready && !imem_in_ram_area && !is_debug_rom_fetch) begin
+      $display("[WARNING] IMEM access to unmapped region: 0x%08h", imem_addr);
+    end
+  end
+`endif
 
   // =================================================================
   //  RISC-V Test Support (Tohost)
@@ -690,58 +794,179 @@ module top_with_ram_sim #(
 endmodule
 
 // =================================================================
-//  Unified Gowin BRAM Wrapper
-//  Port A: IMEM (Instruction Fetch - Read Only)
-//  Port B: DMEM (Data Access - Read/Write)
+//  Unified Gowin BRAM Wrapper - Single Port with Arbiter
+//  True single-port RAM: only one access per cycle
+//  DMEM has priority over IMEM
+//  Suitable for both simulation and Gowin synthesis
 // =================================================================
 module unified_gowin_bram #(
-    parameter DEPTH      = 4096,
-    parameter ADDR_WIDTH = 12
+    parameter        DEPTH      = 4096,
+    parameter        ADDR_WIDTH = 12,
+    parameter string INIT_FILE  = ""  // Optional initialization file
   ) (
     input  logic                     clk,
     input  logic                     reset_n,
     
-    // Port A: IMEM Access
+    // Port A: IMEM Access (Read Only)
     input  logic                     imem_rd_en,
     input  logic [ADDR_WIDTH-1:0]    imem_addr,
     output logic [31:0]              imem_rd_data,
+    output logic                     imem_rd_valid,  // NEW: indicates data is valid
     
-    // Port B: DMEM Access
+    // Port B: DMEM Access (Read/Write)
     input  logic                     dmem_wr_en,
     input  logic                     dmem_rd_en,
     input  logic [ADDR_WIDTH-1:0]    dmem_addr,
     input  logic [31:0]              dmem_wr_data,
-    output logic [31:0]              dmem_rd_data
+    output logic [31:0]              dmem_rd_data,
+    output logic                     dmem_access_valid  // NEW: indicates data/write is valid
   );
 
-  logic active_reset;
-  assign active_reset = ~reset_n;
+  // Single-port BRAM
+  logic [31:0] mem [DEPTH-1:0] /*synthesis syn_ramstyle="block_ram"*/;
+  
+  // Internal registers
+  logic [31:0] rd_data_reg;
+  logic [31:0] imem_rd_data_reg;
+  logic [31:0] dmem_rd_data_reg;
+  
+  // Arbiter state - determines who accessed BRAM in previous cycle
+  typedef enum logic [1:0] {
+    ARB_IDLE,
+    ARB_DMEM_WR,
+    ARB_DMEM_RD,
+    ARB_IMEM_RD
+  } arb_state_t;
+  
+  arb_state_t arb_granted;
+  logic dmem_rd_in_progress;  // Track if DMEM read is in progress
+  logic imem_rd_in_progress;  // Track if IMEM read is in progress
+  
+  // Arbiter logic: DMEM has priority over IMEM
+  logic                  bram_wr_en;
+  logic                  bram_rd_en;
+  logic [ADDR_WIDTH-1:0] bram_addr;
+  logic [31:0]           bram_wr_data;
+  arb_state_t            current_grant;
+  
+  always_comb begin
+    bram_wr_en = 1'b0;
+    bram_rd_en = 1'b0;
+    bram_addr = '0;
+    bram_wr_data = '0;
+    current_grant = ARB_IDLE;
+    
+    // DMEM write has highest priority
+    if (dmem_wr_en) begin
+      current_grant = ARB_DMEM_WR;
+      bram_addr = dmem_addr;
+      bram_wr_data = dmem_wr_data;
+      bram_wr_en = 1'b1;
+      // Write-first: also read if dmem_rd_en is asserted
+      bram_rd_en = dmem_rd_en && !dmem_rd_in_progress;  // Only start new read if not in progress
+    end
+    // DMEM read has second priority (but don't start new read if one is in progress)
+    else if (dmem_rd_en && !dmem_rd_in_progress) begin
+      current_grant = ARB_DMEM_RD;
+      bram_addr = dmem_addr;
+      bram_rd_en = 1'b1;
+    end
+    // IMEM read has lowest priority (but don't start new read if one is in progress)
+    else if (imem_rd_en && !imem_rd_in_progress) begin
+      current_grant = ARB_IMEM_RD;
+      bram_addr = imem_addr;
+      bram_rd_en = 1'b1;
+    end
+  end
 
-  // Gowin_DPB IPコア (True Dual Port Mode)
-  // IP Core Generatorの設定:
-  // - Memory Type: True Dual Port RAM
-  // - Port A: Read Only, Depth=4096, Width=32, Read Mode=Pipeline
-  // - Port B: Read/Write, Depth=4096, Width=32, Read Mode=Pipeline, Write Mode=Normal
-  Gowin_DPB u_bram (
-    // Port A: IMEM
-    .clka   (clk),
-    .reseta (active_reset),
-    .cea    (imem_rd_en),
-    .ocea   (imem_rd_en),
-    .wrea   (1'b0),          // Write Disabled
-    .ada    (imem_addr),
-    .dina   (32'b0),
-    .douta  (imem_rd_data),
+  // BRAM access
+  always_ff @(posedge clk) begin
+    if (bram_wr_en) begin
+      mem[bram_addr] <= bram_wr_data;
+      // Write-first behavior
+      if (bram_rd_en)
+        rd_data_reg <= bram_wr_data;
+    end else if (bram_rd_en) begin
+      rd_data_reg <= mem[bram_addr];
+    end
+  end
+  
+  // Register grant for next cycle
+  always_ff @(posedge clk) begin
+    if (!reset_n) begin
+      arb_granted <= ARB_IDLE;
+      dmem_rd_in_progress <= 1'b0;
+      imem_rd_in_progress <= 1'b0;
+    end else begin
+      arb_granted <= current_grant;
+      
+      // Track read in progress
+      // Set when read starts (bram_rd_en asserted)
+      // Clear when the read completes (arb_granted shows the read was serviced)
+      if (bram_rd_en && current_grant == ARB_DMEM_RD)
+        dmem_rd_in_progress <= 1'b1;
+      else if (arb_granted == ARB_DMEM_RD || arb_granted == ARB_DMEM_WR)
+        dmem_rd_in_progress <= 1'b0;
+      
+      if (bram_rd_en && current_grant == ARB_IMEM_RD)
+        imem_rd_in_progress <= 1'b1;
+      else if (arb_granted == ARB_IMEM_RD)
+        imem_rd_in_progress <= 1'b0;
+    end
+  end
+  
+  // Route data to appropriate port based on who was granted access
+  // Data from BRAM is available in rd_data_reg one cycle after bram_rd_en
+  // arb_granted tells us which port initiated the read
+  always_ff @(posedge clk) begin
+    if (!reset_n) begin
+      imem_rd_data_reg <= '0;
+      dmem_rd_data_reg <= '0;
+      imem_rd_valid <= 1'b0;
+      dmem_access_valid <= 1'b0;
+    end else begin
+      // Default: no valid data
+      imem_rd_valid <= 1'b0;
+      dmem_access_valid <= 1'b0;
+      
+      // Latch data and assert valid based on arb_granted from previous cycle
+      // arb_granted indicates who initiated access in previous cycle
+      // rd_data_reg contains the data read in previous cycle
+      case (arb_granted)
+        ARB_IMEM_RD: begin
+          imem_rd_data_reg <= rd_data_reg;
+          imem_rd_valid <= 1'b1;
+        end
+        ARB_DMEM_RD, ARB_DMEM_WR: begin
+          dmem_rd_data_reg <= rd_data_reg;
+          dmem_access_valid <= 1'b1;
+        end
+      endcase
+    end
+  end
+  
+  assign imem_rd_data = imem_rd_data_reg;
+  assign dmem_rd_data = dmem_rd_data_reg;
 
-    // Port B: DMEM
-    .clkb   (clk),
-    .resetb (active_reset),
-    .ceb    (dmem_wr_en || dmem_rd_en),
-    .oceb   (dmem_rd_en),
-    .wreb   (dmem_wr_en),
-    .adb    (dmem_addr),
-    .dinb   (dmem_wr_data),
-    .doutb  (dmem_rd_data)
-  );
+  // Initialize memory from file
+  initial begin
+    if (INIT_FILE != "") begin
+      $display("[BRAM] Loading %s...", INIT_FILE);
+      $readmemh(INIT_FILE, mem);
+      $display("[BRAM] Memory loaded. First 4 words:");
+      $display("[BRAM]   mem[0] = 0x%08h", mem[0]);
+      $display("[BRAM]   mem[1] = 0x%08h", mem[1]);
+      $display("[BRAM]   mem[2] = 0x%08h", mem[2]);
+      $display("[BRAM]   mem[3] = 0x%08h", mem[3]);
+    end else begin
+      $display("[BRAM] Loading firmware.hex...");
+      $readmemh("firmware.hex", mem);
+      $display("[BRAM] Memory loaded. First 4 words:");
+      $display("[BRAM]   mem[0] = 0x%08h", mem[0]);
+      $display("[BRAM]   mem[1] = 0x%08h", mem[1]);
+      $display("[BRAM]   mem[2] = 0x%08h", mem[2]);
+      $display("[BRAM]   mem[3] = 0x%08h", mem[3]);
+    end
+  end
 
 endmodule

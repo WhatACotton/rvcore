@@ -80,10 +80,10 @@ COMPILE_ARGS += -DDEBUG_AREA_START=32\'h00000000
 COMPILE_ARGS += -DDEBUG_AREA_END=32\'h00001000
 
 # Module parameters for RISC-V tests
-# Tests start at 0x00000000 with custom linker script
-COMPILE_ARGS += -GSTART_ADDR=32\'h00000000
-# tohost address detected from test binaries (typically 0x6C0 for riscv-tests)
-COMPILE_ARGS += -GTOHOST_ADDR=32\'h000006C0
+# Tests start at 0x00010000 (BRAM base) with custom linker script
+COMPILE_ARGS += -GSTART_ADDR=32\'h00010000
+# tohost address for BRAM tests (at offset 0x6C0 from base = 0x106C0)
+COMPILE_ARGS += -GTOHOST_ADDR=32\'h000106C0
 # UART base address (default: 0x100 in APB space)
 UART_BASE ?= 32\'h00000100
 UART_MASK ?= 32\'h00000FF0
@@ -207,6 +207,12 @@ clean-hex:
 clean-all: clean-local clean-hex
 
 # Help target
+# Memory boundary auto-halt test
+.PHONY: test-mem-boundary
+test-mem-boundary:
+	@echo "Running memory boundary auto-halt tests..."
+	@bash run_mem_boundary_test.sh
+
 .PHONY: help
 help:
 	@echo "RISC-V Core Test Makefile (Cocotb-based)"
@@ -225,6 +231,9 @@ help:
 	@echo "  make test                  - Run all RV32UI tests"
 	@echo "  make test-single TEST=<name> - Run a single test"
 	@echo ""
+	@echo "Special Tests:"
+	@echo "  make test-mem-boundary     - Test memory boundary auto-halt"
+	@echo ""
 	@echo "Utilities:"
 	@echo "  make list-tests            - List all available tests"
 	@echo "  make clean-local           - Clean simulation artifacts"
@@ -237,5 +246,6 @@ help:
 	@echo "  make sim-single TEST=rv32ui-p-add"
 	@echo "  make test-single TEST=rv32ui-p-add"
 	@echo "  make sim-rv32ui"
+	@echo "  make test-mem-boundary"
 
 

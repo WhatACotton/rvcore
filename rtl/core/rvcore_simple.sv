@@ -35,6 +35,13 @@ module core #(
     output logic [ 1:0] o_external_trigger,    // [0]=action8/chain0, [1]=action9/chain1
     output logic        gp
   );
+
+  // PC register
+  logic [31:0] pc;
+  // Current instruction
+  logic [31:0] inst;
+  // Saved PC for current instruction (to break timing path)
+  logic [31:0] inst_pc;
   enum logic [2:0] {
          PROC,
          IMEM_READ,
@@ -56,6 +63,18 @@ module core #(
     else
     begin
       proc_state <= next_proc_state;
+      
+      // Debug: Log PC changes when debug_mode changes
+      if (i_haltreq && !debug_mode) begin
+        $display("[RVCORE_PC] Time=%d HART=%0d: Next cycle will set debug_mode=1, pc=0x%08x, proc_state=%0d->%0d", 
+                 $time, HART_ID, `DEBUG_ENTRY_POINT, proc_state, next_proc_state);
+      end
+      
+      // Debug: Log state transitions after halt
+      if (debug_mode && (proc_state != next_proc_state)) begin
+        $display("[RVCORE_STATE] Time=%d HART=%0d: debug_mode=1 proc_state=%0d->%0d pc=0x%08x imem_rready=%b", 
+                 $time, HART_ID, proc_state, next_proc_state, pc, (next_proc_state == IMEM_READ));
+      end
 
       // Save instruction and address for any memory operation
       // (both loads and stores, including SB/SH that need RMW)
@@ -67,12 +86,36 @@ module core #(
     end
   end
 
+  // Detect PC-changing events that require proc_state reset
+  logic pc_jump_event;
+  // Memory boundary check - auto-halt if PC goes out of valid RAM range
+  // Valid RAM: 0x10000 - 0x13FFF (16KB)
+  // Auto-halt prevents executing undefined memory when program is not loaded
+  logic mem_boundary_violation;
+  assign mem_boundary_violation = (pc >= 32'h00014000) && !debug_mode;
+  
+  // CRITICAL: haltreq must wait for instruction_retired to ensure halt at instruction boundary
+  // This prevents halting in the middle of multi-cycle instructions (loads/stores)
+  assign pc_jump_event = (i_haltreq && !debug_mode && instruction_retired) ||
+                         (trigger_fire && !debug_mode) ||
+                         (trigger_exception_req && !debug_mode && instruction_retired) ||
+                         (`IS_DRET(inst) && debug_mode && instruction_retired) ||
+                         (`IS_ECALL(inst) && !debug_mode && instruction_retired) ||
+                         (`IS_EBREAK(inst) && debug_mode && instruction_retired) ||
+                         (`IS_MRET(inst) && !debug_mode && instruction_retired) ||
+                         (mem_boundary_violation && instruction_retired);
+
   always_comb
   begin
     next_proc_state = proc_state;
 
+    // If PC jump event occurs (halt, trap, return), reset to PROC state
+    if (pc_jump_event)
+    begin
+      next_proc_state = PROC;
+    end
     // If exit flag is set, halt the core by staying in current state
-    if (exit_flag)
+    else if (exit_flag)
     begin
       next_proc_state = proc_state;  // Halt - no state transitions
     end
@@ -321,12 +364,6 @@ module core #(
 
   // ============================================================================
 
-  // PC register
-  logic [31:0] pc;
-  // Current instruction
-  logic [31:0] inst;
-  // Saved PC for current instruction (to break timing path)
-  logic [31:0] inst_pc;
   // Saved instruction and address for memory operations (used in writeback)
   logic [31:0] mem_inst;
   logic [31:0] mem_addr_saved;
@@ -1255,7 +1292,7 @@ module core #(
       dcsr_step    <= 1'b0;
       dcsr_prv     <= 2'b11;  // M-mode
       debug_mode   <= 1'b0;   // Always start in normal mode
-      dpc          <= 32'd0;
+      dpc          <= START_ADDR;  // Initialize DPC to START_ADDR for proper resumption
       dscratch0    <= 32'd0;
       dscratch1    <= 32'd0;
 
@@ -1407,8 +1444,22 @@ module core #(
       // This is the single, authoritative block for the PC
       // ======================================================================
 
-      // Trigger exception has highest priority (action=0)
-      if (trigger_exception_req && !debug_mode && instruction_retired)
+      // Memory boundary violation has highest priority (safety mechanism)
+      if (mem_boundary_violation && !debug_mode && instruction_retired)
+      begin
+        // Enter debug mode due to memory boundary violation
+        // This prevents executing undefined memory when program is not properly loaded
+        debug_mode <= 1'b1;
+        dcsr_cause <= `DEBUG_CAUSE_HALTREQ;  // cause = 3 (treat as halt request)
+        dcsr_prv   <= 2'b11;  // M-mode
+        // Save PC that violated the boundary
+        dpc        <= pc;
+        // Jump to Debug ROM entry point
+        pc         <= `DEBUG_ENTRY_POINT;
+        $display("[RVCORE_MEM_BOUNDARY] Time=%d HART_ID=%0d: Memory boundary violation at PC=0x%08x! Auto-halting to debug mode.", 
+                 $time, HART_ID, pc);
+      end  // Trigger exception has second priority (action=0)
+      else if (trigger_exception_req && !debug_mode && instruction_retired)
       begin
         // Trigger exception (breakpoint exception)
         pc           <= mtvec;
@@ -1417,7 +1468,7 @@ module core #(
         mstatus_mpie <= mstatus_mie;
         mstatus_mie  <= 1'b0;
         mstatus_mpp  <= 2'b11;
-      end  // Trigger debug mode entry has second priority (action=1)
+      end  // Trigger debug mode entry has third priority (action=1)
       else if (trigger_fire && !debug_mode)
       begin
         // Enter debug mode due to trigger
@@ -1428,19 +1479,24 @@ module core #(
         dpc        <= inst_pc;
         // Jump to Debug ROM entry point
         pc         <= `DEBUG_ENTRY_POINT;
-      end  // Debug halt request has third priority
-      else if (i_haltreq && !debug_mode)
+      end  // Debug halt request has fourth priority
+      else if (i_haltreq && !debug_mode && instruction_retired)
       begin
-        // Enter debug mode due to halt request
+        // Enter debug mode due to halt request (at instruction boundary)
+        // CRITICAL: Must wait for instruction_retired to ensure halt at instruction boundary
+        // per RISC-V Debug Spec 3.2: halt at next instruction boundary
         debug_mode <= 1'b1;
         dcsr_cause <= `DEBUG_CAUSE_HALTREQ;  // cause = 3 (halt request)
         dcsr_prv   <= 2'b11;
         // M-mode
-        // Save PC of next instruction to be executed
+        // Save PC for resumption - use pc (next instruction) not inst_pc (current)
+        // When instruction_retired=1, current instruction is done, pc points to next
         dpc        <= pc;
         // Jump to Debug ROM entry point
         pc         <= `DEBUG_ENTRY_POINT;
         // Debug ROM entry address
+        $display("[RVCORE_HALT] Time=%d HART_ID=%0d: Entering debug mode due to haltreq! inst_pc=0x%08x pc(next)=0x%08x dpc=0x%08x -> DEBUG_ENTRY=0x%08x", 
+                 $time, HART_ID, inst_pc, pc, pc, `DEBUG_ENTRY_POINT);
       end  // DRET: Exit debug mode
       else if (
         `IS_DRET(inst)
@@ -1470,7 +1526,7 @@ module core #(
         `IS_EBREAK(inst)
         && debug_mode && instruction_retired)
       begin  // Must be retired
-        pc <= `DEBUG_ENTRY_POINT + 32'd4;
+        pc         <= `DEBUG_ENTRY_POINT + 32'd4;
       end
       else if (`IS_MRET(inst) && !debug_mode && instruction_retired)
       begin
