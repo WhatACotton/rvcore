@@ -74,6 +74,9 @@ module top_with_ram_sim_gw #(
   // This ensures Debug ROM and RAM do not overlap in the address space
   localparam bit [31:0] RAM_BASE_ADDR = 32'h00010000;
   localparam bit [31:0] RAM_END_ADDR  = RAM_BASE_ADDR + (IMEM_DEPTH * 4) - 1; // 0x13FFF
+  
+  // Auto-halt trigger address - Write to 0x14000 to trigger debug mode entry
+  localparam bit [31:0] AUTO_HALT_ADDR = 32'h00014000;
 
   // Memory signals
   logic [31:0] imem_bram_dout;
@@ -687,6 +690,26 @@ module top_with_ram_sim_gw #(
     end
   end
 
+  // =================================================================
+  //  Auto-Halt Trigger Logic
+  //  PC reaches 0x14000 (out of RAM bounds) -> automatically enter debug mode
+  //  This catches cases where RAM is not properly initialized
+  // =================================================================
+  logic auto_halt_trigger;
+  always_ff @(posedge clk or negedge reset_n)
+  begin
+    if (!reset_n)
+      auto_halt_trigger <= 1'b0;
+    else if (cpu_imem_rready && (imem_addr == AUTO_HALT_ADDR) && !debug_mode)
+      auto_halt_trigger <= 1'b1;
+    else
+      auto_halt_trigger <= 1'b0;
+  end
+
+  // Combine external haltreq with auto-halt trigger
+  logic combined_haltreq;
+  assign combined_haltreq = i_haltreq | auto_halt_trigger;
+
   // Debug: Monitor CPU reset signal
   logic cpu_reset_n;
   assign cpu_reset_n = reset_n & ~i_resetreq;
@@ -726,7 +749,7 @@ module top_with_ram_sim_gw #(
          .m_software_interrupt(1'b0),
 
          // Debug interface
-         .i_haltreq   (i_haltreq),
+         .i_haltreq   (combined_haltreq),  // Use combined haltreq with auto-trigger
          .debug_mode_o(debug_mode),
 
          // External triggers
