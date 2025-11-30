@@ -294,8 +294,8 @@ module core #(
   logic [31:0] dscratch0;
   logic [31:0] dscratch1;
 
-  // Hart ID register
-  logic [31:0] mhartid;
+  // Hart ID - Use parameter directly as constant (not a register)
+  // This ensures each hart instance has the correct, unchangeable ID
 
   // ==========================================================================
   // Trigger Module (Sdtrig - Separated for better synthesis)
@@ -1032,7 +1032,7 @@ module core #(
       `CSR_ADDR_MCONTEXT:
         csr_rdata = mcontext;
       12'hF14:
-        csr_rdata = mhartid;  // mhartid
+        csr_rdata = HART_ID;  // mhartid - use parameter directly
       default:
         csr_rdata = 32'd0;  // Unsupported CSRs return 0
     endcase
@@ -1296,8 +1296,8 @@ module core #(
       dscratch0    <= 32'd0;
       dscratch1    <= 32'd0;
 
-      // Initialize Hart ID
-      mhartid      <= HART_ID;
+      // Hart ID is now a compile-time constant (HART_ID parameter)
+      // No initialization needed
 
       // Initialize Trigger CSRs
       tselect      <= 2'd0;

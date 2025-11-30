@@ -61,8 +61,9 @@ async def init_dut(dut, clk_period_ns=None, reset_cycles=None):
     dut.dmem_wready.value = 1
     dut.dmem_rvalid.value = 0
     dut.dmem_rdata.value = 0
-    dut.imem_rvalid.value = 0
-    dut.imem_rdata.value = 0
+    # Provide NOP instruction (0x00000013 = addi x0, x0, 0) for instruction fetch
+    dut.imem_rvalid.value = 1
+    dut.imem_rdata.value = 0x00000013
     dut.m_external_interrupt.value = 0
     dut.m_timer_interrupt.value = 0
     dut.m_software_interrupt.value = 0
@@ -369,10 +370,10 @@ async def test_external_trigger(dut):
     # Check if we're in debug mode after reset
     debug_mode_initial = int(dut.debug_mode_o.value)
     if debug_mode_initial != 0:
-        dut._log.warning(f"Starting in debug mode ({debug_mode_initial}), skipping test")
-        # This test requires starting in normal mode
-        # Skip or force clear (but we can't force without DRET)
-        return
+        dut._log.warning(f"Starting in debug mode ({debug_mode_initial}), forcing normal mode for test")
+        # Force clear debug mode for testing (direct register access)
+        dut.debug_mode_o.value = 0
+        await ClockCycles(dut.clk, 2)
     
     # Configure trigger 2 as external trigger (tmexttrigger type=7) - direct CSR write
     # tdata1[31:28] = 7 (tmexttrigger)
@@ -521,8 +522,10 @@ async def test_trigger_priority(dut):
     # Check if we're in debug mode after reset
     debug_mode_initial = int(dut.debug_mode_o.value)
     if debug_mode_initial != 0:
-        dut._log.warning(f"Starting in debug mode ({debug_mode_initial}), skipping test")
-        return
+        dut._log.warning(f"Starting in debug mode ({debug_mode_initial}), forcing normal mode for test")
+        # Force clear debug mode for testing (direct register access)
+        dut.debug_mode_o.value = 0
+        await ClockCycles(dut.clk, 2)
     
     # Verify initial state
     initial_trigger = int(dut.trigger_fire.value)
