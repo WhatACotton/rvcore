@@ -550,26 +550,29 @@ module top_with_ram_sim_gw #(
   logic dmem_wready_clint;
   logic dmem_wready_uart;
 
-  // IMEM valid signals - 1 cycle delay for Gowin BRAM
+  // Track previous cycle's read enable for BRAM valid generation
+  logic imem_rd_en_q;
+  logic dmem_rd_en_q;
+  
   always_ff @(posedge clk or negedge reset_n)
   begin
-    if (!reset_n)
-      imem_rvalid_normal <= 1'b0;
-    else
-      imem_rvalid_normal <= cpu_imem_rready && imem_in_ram_area && !is_debug_rom_fetch;
+    if (!reset_n) begin
+      imem_rd_en_q <= 1'b0;
+      dmem_rd_en_q <= 1'b0;
+    end else begin
+      imem_rd_en_q <= cpu_imem_rready && imem_in_ram_area && !is_debug_rom_fetch;
+      dmem_rd_en_q <= cpu_dmem_rready && dmem_in_ram_area && !is_debug_data_access && !is_clint_access && !is_uart_access;
+    end
   end
+
+  // IMEM valid signals - asserted when previous cycle had read enable
+  assign imem_rvalid_normal = imem_rd_en_q;
 
   assign imem_rvalid_debug = (imem_apb_state == IMEM_ACCESS && imem_apb_if.pready);
   assign cpu_imem_rvalid   = imem_rvalid_normal || imem_rvalid_debug;
 
-  // DMEM read valid signals - 1 cycle delay for Gowin BRAM
-  always_ff @(posedge clk or negedge reset_n)
-  begin
-    if (!reset_n)
-      dmem_rvalid_normal <= 1'b0;
-    else
-      dmem_rvalid_normal <= cpu_dmem_rready && dmem_in_ram_area && !is_debug_data_access && !is_clint_access && !is_uart_access;
-  end
+  // DMEM read valid signals - asserted when previous cycle had read enable
+  assign dmem_rvalid_normal = dmem_rd_en_q;
 
   assign dmem_rvalid_debug = (dmem_apb_state == DMEM_ACCESS && dmem_apb_if.pready && !dmem_transaction_write);
   assign dmem_rvalid_clint = is_clint_read && clint_pready;
