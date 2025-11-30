@@ -692,7 +692,7 @@ module top_with_ram_sim_gw #(
 
   // =================================================================
   //  Auto-Halt Trigger Logic
-  //  PC reaches 0x14000 (out of RAM bounds) -> automatically enter debug mode
+  //  PC reaches 0x14000 or beyond (out of RAM bounds) -> automatically enter debug mode
   //  This catches cases where RAM is not properly initialized
   // =================================================================
   logic auto_halt_trigger;
@@ -700,7 +700,7 @@ module top_with_ram_sim_gw #(
   begin
     if (!reset_n)
       auto_halt_trigger <= 1'b0;
-    else if (cpu_imem_rready && (imem_addr == AUTO_HALT_ADDR) && !debug_mode)
+    else if (cpu_imem_rready && (imem_addr >= AUTO_HALT_ADDR) && !debug_mode)
       auto_halt_trigger <= 1'b1;
     else
       auto_halt_trigger <= 1'b0;
