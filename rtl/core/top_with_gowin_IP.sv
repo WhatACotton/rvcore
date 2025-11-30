@@ -550,29 +550,35 @@ module top_with_ram_sim_gw #(
   logic dmem_wready_clint;
   logic dmem_wready_uart;
 
-  // Track previous cycle's read enable for BRAM valid generation
+  // Track previous cycle's read enable for BRAM valid generation (one-shot pulse)
   logic imem_rd_en_q;
   logic dmem_rd_en_q;
+  logic imem_rd_en_qq;  // Two cycles delayed for edge detection
+  logic dmem_rd_en_qq;
   
   always_ff @(posedge clk or negedge reset_n)
   begin
     if (!reset_n) begin
       imem_rd_en_q <= 1'b0;
       dmem_rd_en_q <= 1'b0;
+      imem_rd_en_qq <= 1'b0;
+      dmem_rd_en_qq <= 1'b0;
     end else begin
       imem_rd_en_q <= cpu_imem_rready && imem_in_ram_area && !is_debug_rom_fetch;
       dmem_rd_en_q <= cpu_dmem_rready && dmem_in_ram_area && !is_debug_data_access && !is_clint_access && !is_uart_access;
+      imem_rd_en_qq <= imem_rd_en_q;
+      dmem_rd_en_qq <= dmem_rd_en_q;
     end
   end
 
-  // IMEM valid signals - asserted when previous cycle had read enable
-  assign imem_rvalid_normal = imem_rd_en_q;
+  // IMEM valid signals - one-shot pulse on rising edge of read enable
+  assign imem_rvalid_normal = imem_rd_en_q && !imem_rd_en_qq;
 
   assign imem_rvalid_debug = (imem_apb_state == IMEM_ACCESS && imem_apb_if.pready);
   assign cpu_imem_rvalid   = imem_rvalid_normal || imem_rvalid_debug;
 
-  // DMEM read valid signals - asserted when previous cycle had read enable
-  assign dmem_rvalid_normal = dmem_rd_en_q;
+  // DMEM read valid signals - one-shot pulse on rising edge of read enable
+  assign dmem_rvalid_normal = dmem_rd_en_q && !dmem_rd_en_qq;
 
   assign dmem_rvalid_debug = (dmem_apb_state == DMEM_ACCESS && dmem_apb_if.pready && !dmem_transaction_write);
   assign dmem_rvalid_clint = is_clint_read && clint_pready;
@@ -580,8 +586,20 @@ module top_with_ram_sim_gw #(
   
   assign cpu_dmem_rvalid = dmem_rvalid_normal || dmem_rvalid_debug || dmem_rvalid_clint || dmem_rvalid_uart;
 
-  // DMEM write ready signals - immediate for Gowin BRAM
-  assign dmem_wready_normal = dmem_in_ram_area && !is_debug_data_access && !is_clint_access && !is_uart_access; 
+  // DMEM write ready signals - must match read latency for consistency
+  // Track previous cycle's write enable for proper handshake
+  logic dmem_wr_en_q;
+  
+  always_ff @(posedge clk or negedge reset_n)
+  begin
+    if (!reset_n)
+      dmem_wr_en_q <= 1'b0;
+    else
+      dmem_wr_en_q <= (cpu_dmem_wvalid != 2'b00) && dmem_in_ram_area && !is_debug_data_access && !is_clint_access && !is_uart_access;
+  end
+  
+  // Write completes one cycle after write enable (matching BRAM timing)
+  assign dmem_wready_normal = dmem_wr_en_q;
   
   assign dmem_wready_debug = (dmem_apb_state == DMEM_ACCESS && dmem_apb_if.pready && dmem_transaction_write);
   assign dmem_wready_clint = is_clint_write && clint_pready;
