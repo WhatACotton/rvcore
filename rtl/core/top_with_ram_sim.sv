@@ -334,6 +334,11 @@ module top_with_ram_sim #(
       imem_apb_addr_reg     <= '0;
       imem_transaction_addr <= '0;
     end
+    else if (!i_dmactive)
+    begin
+      // Reset state machine when debug module is deactivated (OpenOCD disconnect)
+      imem_apb_state        <= IMEM_IDLE;
+    end
     else
     begin
       imem_apb_state <= imem_apb_next_state;
@@ -442,6 +447,11 @@ module top_with_ram_sim #(
       dmem_transaction_addr  <= '0;
       dmem_transaction_wdata <= '0;
       dmem_transaction_write <= 1'b0;
+    end
+    else if (!i_dmactive)
+    begin
+      // Reset state machine when debug module is deactivated (OpenOCD disconnect)
+      dmem_apb_state         <= DMEM_IDLE;
     end
     else
     begin
