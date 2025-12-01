@@ -820,7 +820,7 @@ module unified_gowin_dpb #(
     .clka   (clk),
     .reseta (active_reset),
     .cea    (imem_rd_en),
-    .ocea   (imem_rd_en),
+    .ocea   (1'b1),          // Always enable output register in READ_MODE=1
     .wrea   (1'b0),          // Write Disabled
     .ada    (imem_addr),
     .dina   (32'b0),
@@ -830,7 +830,7 @@ module unified_gowin_dpb #(
     .clkb   (clk),
     .resetb (active_reset),
     .ceb    (dmem_wr_en || dmem_rd_en),
-    .oceb   (dmem_rd_en),
+    .oceb   (1'b1),          // Always enable output register in READ_MODE=1
     .wreb   (dmem_wr_en),
     .adb    (dmem_addr),
     .dinb   (dmem_wr_data),
