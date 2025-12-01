@@ -551,34 +551,29 @@ module top_with_ram_sim_gw #(
   logic dmem_wready_uart;
 
   // Track previous cycle's read enable for BRAM valid generation (one-shot pulse)
+  // For READ_MODE=0 (bypass mode): data available same cycle, valid next cycle
   logic imem_rd_en_q;
   logic dmem_rd_en_q;
-  logic imem_rd_en_qq;  // Two cycles delayed for edge detection
-  logic dmem_rd_en_qq;
   
   always_ff @(posedge clk or negedge reset_n)
   begin
     if (!reset_n) begin
       imem_rd_en_q <= 1'b0;
       dmem_rd_en_q <= 1'b0;
-      imem_rd_en_qq <= 1'b0;
-      dmem_rd_en_qq <= 1'b0;
     end else begin
       imem_rd_en_q <= cpu_imem_rready && imem_in_ram_area && !is_debug_rom_fetch;
       dmem_rd_en_q <= cpu_dmem_rready && dmem_in_ram_area && !is_debug_data_access && !is_clint_access && !is_uart_access;
-      imem_rd_en_qq <= imem_rd_en_q;
-      dmem_rd_en_qq <= dmem_rd_en_q;
     end
   end
 
-  // IMEM valid signals - one-shot pulse on rising edge of read enable
-  assign imem_rvalid_normal = imem_rd_en_q && !imem_rd_en_qq;
+  // IMEM valid signals - for bypass mode, valid 1 cycle after request
+  assign imem_rvalid_normal = imem_rd_en_q;
 
   assign imem_rvalid_debug = (imem_apb_state == IMEM_ACCESS && imem_apb_if.pready);
   assign cpu_imem_rvalid   = imem_rvalid_normal || imem_rvalid_debug;
 
-  // DMEM read valid signals - one-shot pulse on rising edge of read enable
-  assign dmem_rvalid_normal = dmem_rd_en_q && !dmem_rd_en_qq;
+  // DMEM read valid signals - for bypass mode, valid 1 cycle after request
+  assign dmem_rvalid_normal = dmem_rd_en_q;
 
   assign dmem_rvalid_debug = (dmem_apb_state == DMEM_ACCESS && dmem_apb_if.pready && !dmem_transaction_write);
   assign dmem_rvalid_clint = is_clint_read && clint_pready;
