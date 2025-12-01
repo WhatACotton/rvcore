@@ -58,7 +58,6 @@ module top_with_ram_sim #(
     output logic uart_tx_o,
     output logic uart_event_o,
 
-    input  logic i_dmactive,
     input logic i_ext_resume_trigger
 
 
