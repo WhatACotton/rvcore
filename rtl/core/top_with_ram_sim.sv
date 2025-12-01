@@ -334,9 +334,10 @@ module top_with_ram_sim #(
       imem_apb_addr_reg     <= '0;
       imem_transaction_addr <= '0;
     end
-    else if (!i_dmactive)
+    else if (!debug_mode)
     begin
-      // Reset state machine when debug module is deactivated (OpenOCD disconnect)
+      // Reset state machine when exiting debug mode (DRET)
+      // This ensures clean state when re-entering debug mode
       imem_apb_state        <= IMEM_IDLE;
     end
     else
@@ -448,9 +449,10 @@ module top_with_ram_sim #(
       dmem_transaction_wdata <= '0;
       dmem_transaction_write <= 1'b0;
     end
-    else if (!i_dmactive)
+    else if (!debug_mode)
     begin
-      // Reset state machine when debug module is deactivated (OpenOCD disconnect)
+      // Reset state machine when exiting debug mode (DRET)
+      // This ensures clean state when re-entering debug mode
       dmem_apb_state         <= DMEM_IDLE;
     end
     else
