@@ -405,28 +405,22 @@ module top_with_ram_sim #(
           imem_apb_if.psel    <= 1'b1;
           imem_apb_if.penable <= 1'b1;
         end
-        DMEM_ACCESS:
+        IMEM_ACCESS:
         begin
-          dmem_apb_if.paddr   <= dmem_transaction_addr;
-          dmem_apb_if.psel    <= 1'b1;
-          dmem_apb_if.penable <= 1'b1;
-          if (dmem_apb_if.pready)
+          imem_apb_if.paddr   <= imem_transaction_addr;
+          imem_apb_if.psel    <= 1'b1;
+          imem_apb_if.penable <= 1'b1;
+          if (imem_apb_if.pready)
           begin
-            dmem_apb_if.psel    <= 1'b0;
-            dmem_apb_if.penable <= 1'b0;
+            imem_apb_if.psel    <= 1'b0;
+            imem_apb_if.penable <= 1'b0;
           end
         end
-        DMEM_ERROR:
+        IMEM_ERROR:
         begin
           // Deassert APB signals on error
-          dmem_apb_if.psel    <= 1'b0;
-          dmem_apb_if.penable <= 1'b0;
-        end
-        default:
-        begin
-          dmem_apb_if.psel    <= 1'b0;
-          dmem_apb_if.penable <= 1'b0;
-        endmem_apb_if.penable <= 1'b0;
+          imem_apb_if.psel    <= 1'b0;
+          imem_apb_if.penable <= 1'b0;
         end
         default:
         begin
@@ -557,6 +551,12 @@ module top_with_ram_sim #(
             dmem_apb_if.psel    <= 1'b0;
             dmem_apb_if.penable <= 1'b0;
           end
+        end
+        DMEM_ERROR:
+        begin
+          // Deassert APB signals on error
+          dmem_apb_if.psel    <= 1'b0;
+          dmem_apb_if.penable <= 1'b0;
         end
         default:
         begin
