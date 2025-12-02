@@ -315,11 +315,10 @@ module top_with_ram_sim #(
   // =================================================================
   //  IMEM APB Master Logic (Debug ROM Access)
   // =================================================================
-  typedef enum logic [2:0] {
+  typedef enum logic [1:0] {
             IMEM_IDLE,
             IMEM_SETUP,
-            IMEM_ACCESS,
-            IMEM_ERROR
+            IMEM_ACCESS
           } imem_apb_state_t;
   imem_apb_state_t imem_apb_state, imem_apb_next_state;
 
@@ -361,13 +360,8 @@ module top_with_ram_sim #(
       IMEM_SETUP:
         imem_apb_next_state = IMEM_ACCESS;
       IMEM_ACCESS:
-        if (imem_apb_if.pready)
-          imem_apb_next_state = IMEM_IDLE;  // Normal completion
-        else if (imem_apb_if.pslverr)
-          imem_apb_next_state = IMEM_ERROR; // Timeout/error - retry
-      IMEM_ERROR:
-        // Wait one cycle then retry from IDLE (CPU will re-issue request)
-        imem_apb_next_state = IMEM_IDLE;
+        if (imem_apb_if.pready || imem_apb_if.pslverr)
+          imem_apb_next_state = IMEM_IDLE;  // Complete on pready or error
       default:
         imem_apb_next_state = IMEM_IDLE;
     endcase
@@ -410,17 +404,11 @@ module top_with_ram_sim #(
           imem_apb_if.paddr   <= imem_transaction_addr;
           imem_apb_if.psel    <= 1'b1;
           imem_apb_if.penable <= 1'b1;
-          if (imem_apb_if.pready)
+          if (imem_apb_if.pready || imem_apb_if.pslverr)
           begin
             imem_apb_if.psel    <= 1'b0;
             imem_apb_if.penable <= 1'b0;
           end
-        end
-        IMEM_ERROR:
-        begin
-          // Deassert APB signals on error
-          imem_apb_if.psel    <= 1'b0;
-          imem_apb_if.penable <= 1'b0;
         end
         default:
         begin
@@ -434,11 +422,10 @@ module top_with_ram_sim #(
   // =================================================================
   //  DMEM APB Master Logic (Debug Module Access)
   // =================================================================
-  typedef enum logic [2:0] {
+  typedef enum logic [1:0] {
             DMEM_IDLE,
             DMEM_SETUP,
-            DMEM_ACCESS,
-            DMEM_ERROR
+            DMEM_ACCESS
           } dmem_apb_state_t;
   dmem_apb_state_t dmem_apb_state, dmem_apb_next_state;
 
@@ -492,13 +479,8 @@ module top_with_ram_sim #(
       DMEM_SETUP:
         dmem_apb_next_state = DMEM_ACCESS;
       DMEM_ACCESS:
-        if (dmem_apb_if.pready)
-          dmem_apb_next_state = DMEM_IDLE;  // Normal completion
-        else if (dmem_apb_if.pslverr)
-          dmem_apb_next_state = DMEM_ERROR; // Timeout/error - retry
-      DMEM_ERROR:
-        // Wait one cycle then retry from IDLE (CPU will re-issue request)
-        dmem_apb_next_state = DMEM_IDLE;
+        if (dmem_apb_if.pready || dmem_apb_if.pslverr)
+          dmem_apb_next_state = DMEM_IDLE;  // Complete on pready or error
       default:
         dmem_apb_next_state = DMEM_IDLE;
     endcase
@@ -546,17 +528,11 @@ module top_with_ram_sim #(
           dmem_apb_if.pwdata  <= dmem_transaction_wdata;
           dmem_apb_if.psel    <= 1'b1;
           dmem_apb_if.penable <= 1'b1;
-          if (dmem_apb_if.pready)
+          if (dmem_apb_if.pready || dmem_apb_if.pslverr)
           begin
             dmem_apb_if.psel    <= 1'b0;
             dmem_apb_if.penable <= 1'b0;
           end
-        end
-        DMEM_ERROR:
-        begin
-          // Deassert APB signals on error
-          dmem_apb_if.psel    <= 1'b0;
-          dmem_apb_if.penable <= 1'b0;
         end
         default:
         begin
@@ -586,7 +562,7 @@ module top_with_ram_sim #(
   // For single-port BRAM: use the valid signal from arbiter
   assign imem_rvalid_normal = bram_imem_valid;
 
-  // Only return rvalid on successful pready (ERROR state will retry without returning invalid data)
+  // Only return rvalid on successful pready completion
   assign imem_rvalid_debug = (imem_apb_state == IMEM_ACCESS && imem_apb_if.pready);
   assign cpu_imem_rvalid   = imem_rvalid_normal || imem_rvalid_debug;
 
@@ -594,7 +570,7 @@ module top_with_ram_sim #(
   // For single-port BRAM: use the valid signal from arbiter
   assign dmem_rvalid_normal = bram_dmem_valid && !dmem_bram_we;  // Valid for reads only
 
-  // Only return rvalid on successful pready (ERROR state will retry without returning invalid data)
+  // Only return rvalid on successful pready completion
   assign dmem_rvalid_debug = (dmem_apb_state == DMEM_ACCESS && dmem_apb_if.pready && !dmem_transaction_write);
   assign dmem_rvalid_clint = is_clint_read && clint_pready;
   assign dmem_rvalid_uart  = is_uart_read && uart_pready;
@@ -606,7 +582,7 @@ module top_with_ram_sim #(
   // (no arbitration conflict for writes - they always win)
   assign dmem_wready_normal = dmem_in_ram_area && !is_debug_data_access && !is_clint_access && !is_uart_access; 
   
-  // Only return wready on successful pready (ERROR state will retry without completing invalid write)
+  // Only return wready on successful pready completion
   assign dmem_wready_debug = (dmem_apb_state == DMEM_ACCESS && dmem_apb_if.pready && dmem_transaction_write);
   assign dmem_wready_clint = is_clint_write && clint_pready;
   assign dmem_wready_uart  = is_uart_write && uart_pready;
