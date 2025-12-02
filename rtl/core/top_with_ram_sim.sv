@@ -360,7 +360,8 @@ module top_with_ram_sim #(
       IMEM_SETUP:
         imem_apb_next_state = IMEM_ACCESS;
       IMEM_ACCESS:
-        if (imem_apb_if.pready)
+        // Return to IDLE on pready (normal completion) or pslverr (timeout/error)
+        if (imem_apb_if.pready || imem_apb_if.pslverr)
           imem_apb_next_state = IMEM_IDLE;
       default:
         imem_apb_next_state = IMEM_IDLE;
@@ -479,7 +480,8 @@ module top_with_ram_sim #(
       DMEM_SETUP:
         dmem_apb_next_state = DMEM_ACCESS;
       DMEM_ACCESS:
-        if (dmem_apb_if.pready)
+        // Return to IDLE on pready (normal completion) or pslverr (timeout/error)
+        if (dmem_apb_if.pready || dmem_apb_if.pslverr)
           dmem_apb_next_state = DMEM_IDLE;
       default:
         dmem_apb_next_state = DMEM_IDLE;
