@@ -917,14 +917,16 @@ module unified_gowin_bram #(
       // Track read in progress
       // Set when read starts (bram_rd_en asserted)
       // Clear when the read completes (arb_granted shows the read was serviced)
+      // CRITICAL FIX: Also clear when access is requested but doesn't use BRAM
+      // (e.g., debug ROM access via APB, peripheral access)
       if (bram_rd_en && current_grant == ARB_DMEM_RD)
         dmem_rd_in_progress <= 1'b1;
-      else if (arb_granted == ARB_DMEM_RD || arb_granted == ARB_DMEM_WR)
+      else if (arb_granted == ARB_DMEM_RD || arb_granted == ARB_DMEM_WR || (dmem_rd_en && !bram_rd_en))
         dmem_rd_in_progress <= 1'b0;
       
       if (bram_rd_en && current_grant == ARB_IMEM_RD)
         imem_rd_in_progress <= 1'b1;
-      else if (arb_granted == ARB_IMEM_RD)
+      else if (arb_granted == ARB_IMEM_RD || (imem_rd_en && !bram_rd_en))
         imem_rd_in_progress <= 1'b0;
     end
   end
