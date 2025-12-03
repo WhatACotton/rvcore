@@ -575,7 +575,12 @@ module top_with_ram_sim #(
   assign dmem_rvalid_clint = is_clint_read && clint_pready;
   assign dmem_rvalid_uart  = is_uart_read && uart_pready;
   
-  assign cpu_dmem_rvalid = dmem_rvalid_normal || dmem_rvalid_debug || dmem_rvalid_clint || dmem_rvalid_uart;
+  // Debug mode out-of-range access: return 0 immediately for any address outside valid ranges
+  logic dmem_rvalid_debug_outofrange;
+  assign dmem_rvalid_debug_outofrange = debug_mode && cpu_dmem_rready && 
+         !is_debug_data_access && !dmem_in_ram_area && !is_clint_access && !is_uart_access;
+  
+  assign cpu_dmem_rvalid = dmem_rvalid_normal || dmem_rvalid_debug || dmem_rvalid_clint || dmem_rvalid_uart || dmem_rvalid_debug_outofrange;
 
   // DMEM write ready signals
   // For single-port BRAM: writes are always accepted immediately
@@ -587,7 +592,12 @@ module top_with_ram_sim #(
   assign dmem_wready_clint = is_clint_write && clint_pready;
   assign dmem_wready_uart  = is_uart_write && uart_pready;
   
-  assign cpu_dmem_wready = dmem_wready_normal || dmem_wready_debug || dmem_wready_clint || dmem_wready_uart;
+  // Debug mode out-of-range access: accept writes immediately (discard)
+  logic dmem_wready_debug_outofrange;
+  assign dmem_wready_debug_outofrange = debug_mode && (cpu_dmem_wvalid != 2'b00) && 
+         !is_debug_data_access && !dmem_in_ram_area && !is_clint_access && !is_uart_access;
+  
+  assign cpu_dmem_wready = dmem_wready_normal || dmem_wready_debug || dmem_wready_clint || dmem_wready_uart || dmem_wready_debug_outofrange;
 
   // =================================================================
   //  APB Response Capture and Memory Data Muxing
