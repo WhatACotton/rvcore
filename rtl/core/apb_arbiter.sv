@@ -177,26 +177,23 @@ module apb_arbiter #(
     case (current_state)
       IDLE:
       begin
-        if (grant[0] || grant[1])
-        begin
-          slave_if.psel    = 1'b1;
-          slave_if.penable = 1'b0;
-        end
-        else
-        begin
-          slave_if.psel    = 1'b0;
-          slave_if.penable = 1'b0;
-        end
+        // IDLE state: no APB transaction active
+        // PSEL will be asserted in SETUP state after grant_q is registered
+        slave_if.psel    = 1'b0;
+        slave_if.penable = 1'b0;
       end
 
       SETUP:
       begin
+        // SETUP phase: PSEL=1, PENABLE=0
+        // grant_q is now valid (registered from IDLE->SETUP transition)
         slave_if.psel    = 1'b1;
-        slave_if.penable = 1'b1;
+        slave_if.penable = 1'b0;
       end
 
       UPDATE:
       begin
+        // ACCESS phase: PSEL=1, PENABLE=1, wait for PREADY
         slave_if.psel    = 1'b1;
         slave_if.penable = 1'b1;
       end
@@ -219,13 +216,15 @@ module apb_arbiter #(
     master1_if.prdata  = '0;
     master1_if.pslverr = 1'b0;
 
-    if (grant_q[0])
+    // Only route responses during active transaction (SETUP/UPDATE states)
+    // This prevents routing stale responses in IDLE state
+    if (grant_q[0] && (current_state == SETUP || current_state == UPDATE))
     begin
       master0_if.pready  = slave_if.pready;
       master0_if.prdata  = slave_if.prdata;
       master0_if.pslverr = slave_if.pslverr;
     end
-    else if (grant_q[1])
+    else if (grant_q[1] && (current_state == SETUP || current_state == UPDATE))
     begin
       master1_if.pready  = slave_if.pready;
       master1_if.prdata  = slave_if.prdata;
