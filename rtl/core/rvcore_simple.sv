@@ -1510,8 +1510,14 @@ module core #(
         dpc        <= pc;
         // Jump to Debug ROM entry point
         pc         <= `DEBUG_ENTRY_POINT;
-        $display("[RVCORE_STEP] Time=%d HART_ID=%0d: Re-entering debug mode after single-step! inst_pc=0x%08x pc(next)=0x%08x dpc=0x%08x -> DEBUG_ENTRY=0x%08x", 
-                 $time, HART_ID, inst_pc, pc, pc, `DEBUG_ENTRY_POINT);
+        $display("[RVCORE_STEP] Time=%d HART_ID=%0d: Re-entering debug mode after single-step! inst_pc=0x%08x pc(next)=0x%08x dpc=0x%08x -> DEBUG_ENTRY=0x%08x dcsr_step=%b", 
+                 $time, HART_ID, inst_pc, pc, pc, `DEBUG_ENTRY_POINT, dcsr_step);
+      end
+      else if (!debug_mode && dcsr_step)
+      begin
+        // Debug: dcsr.step is set but instruction not retired
+        $display("[RVCORE_STEP_WAIT] Time=%d HART_ID=%0d: dcsr_step=1 but instruction_retired=0, pc=0x%08x inst_pc=0x%08x proc_state=%d", 
+                 $time, HART_ID, pc, inst_pc, proc_state);
       end  // DRET: Exit debug mode
       else if (
         `IS_DRET(inst)
