@@ -1497,6 +1497,21 @@ module core #(
         // Debug ROM entry address
         $display("[RVCORE_HALT] Time=%d HART_ID=%0d: Entering debug mode due to haltreq! inst_pc=0x%08x pc(next)=0x%08x dpc=0x%08x -> DEBUG_ENTRY=0x%08x", 
                  $time, HART_ID, inst_pc, pc, pc, `DEBUG_ENTRY_POINT);
+      end  // Single-step: Auto-halt after one instruction when dcsr.step=1
+      else if (!debug_mode && dcsr_step && instruction_retired)
+      begin
+        // Re-enter debug mode after executing single instruction in step mode
+        // per RISC-V Debug Spec 4.8.3: dcsr.step causes hart to enter debug mode
+        // immediately after executing one instruction
+        debug_mode <= 1'b1;
+        dcsr_cause <= `DEBUG_CAUSE_STEP;  // cause = 4 (single step)
+        dcsr_prv   <= 2'b11;  // M-mode
+        // Save PC for resumption - pc points to next instruction after the one just executed
+        dpc        <= pc;
+        // Jump to Debug ROM entry point
+        pc         <= `DEBUG_ENTRY_POINT;
+        $display("[RVCORE_STEP] Time=%d HART_ID=%0d: Re-entering debug mode after single-step! inst_pc=0x%08x pc(next)=0x%08x dpc=0x%08x -> DEBUG_ENTRY=0x%08x", 
+                 $time, HART_ID, inst_pc, pc, pc, `DEBUG_ENTRY_POINT);
       end  // DRET: Exit debug mode
       else if (
         `IS_DRET(inst)
