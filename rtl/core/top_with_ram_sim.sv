@@ -562,16 +562,16 @@ module top_with_ram_sim #(
   // For single-port BRAM: use the valid signal from arbiter
   assign imem_rvalid_normal = bram_imem_valid;
 
-  // Only return rvalid on successful pready completion
-  assign imem_rvalid_debug = (imem_apb_state == IMEM_ACCESS && imem_apb_if.pready);
+  // Only return rvalid on successful pready completion (including error responses)
+  assign imem_rvalid_debug = (imem_apb_state == IMEM_ACCESS && (imem_apb_if.pready || imem_apb_if.pslverr));
   assign cpu_imem_rvalid   = imem_rvalid_normal || imem_rvalid_debug;
 
   // DMEM read valid signals
   // For single-port BRAM: use the valid signal from arbiter
   assign dmem_rvalid_normal = bram_dmem_valid && !dmem_bram_we;  // Valid for reads only
 
-  // Only return rvalid on successful pready completion
-  assign dmem_rvalid_debug = (dmem_apb_state == DMEM_ACCESS && dmem_apb_if.pready && !dmem_transaction_write);
+  // Only return rvalid on successful pready completion (including error responses)
+  assign dmem_rvalid_debug = (dmem_apb_state == DMEM_ACCESS && (dmem_apb_if.pready || dmem_apb_if.pslverr) && !dmem_transaction_write);
   assign dmem_rvalid_clint = is_clint_read && clint_pready;
   assign dmem_rvalid_uart  = is_uart_read && uart_pready;
   
@@ -582,8 +582,8 @@ module top_with_ram_sim #(
   // (no arbitration conflict for writes - they always win)
   assign dmem_wready_normal = dmem_in_ram_area && !is_debug_data_access && !is_clint_access && !is_uart_access; 
   
-  // Only return wready on successful pready completion
-  assign dmem_wready_debug = (dmem_apb_state == DMEM_ACCESS && dmem_apb_if.pready && dmem_transaction_write);
+  // Only return wready on successful pready completion (including error responses)
+  assign dmem_wready_debug = (dmem_apb_state == DMEM_ACCESS && (dmem_apb_if.pready || dmem_apb_if.pslverr) && dmem_transaction_write);
   assign dmem_wready_clint = is_clint_write && clint_pready;
   assign dmem_wready_uart  = is_uart_write && uart_pready;
   
