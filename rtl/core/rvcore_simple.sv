@@ -101,8 +101,10 @@ module core #(
                          (trigger_exception_req && !debug_mode && instruction_retired) ||
                          (`IS_DRET(inst) && debug_mode && instruction_retired) ||
                          (`IS_ECALL(inst) && !debug_mode && instruction_retired) ||
-                         (`IS_EBREAK(inst) && debug_mode && instruction_retired) ||
+                         (`IS_EBREAK(inst) && !debug_mode && instruction_retired) ||  // Software breakpoint
+                         (`IS_EBREAK(inst) && debug_mode && instruction_retired) ||   // EBREAK in debug mode
                          (`IS_MRET(inst) && !debug_mode && instruction_retired) ||
+                         (dcsr_step && !debug_mode && instruction_retired) ||  // Single-step mode
                          (mem_boundary_violation && instruction_retired);
 
   always_comb
@@ -264,10 +266,11 @@ module core #(
   // Construct mstatus register from bit fields
   assign mstatus = {19'd0, mstatus_mpp, 3'd0, mstatus_mpie, 3'd0, mstatus_mie, 3'd0};
 
-  // Debug CSR registers
+  // Debug registers
   logic [31:0] dcsr;  // Debug Control and Status Register
   logic [31:0] dpc;
-  // Debug Program Counter
+  // Debug Pro  logic [31:0] dpc_prev;  // Previous DPC value for debugging
+  logic        dpc_protected;  // Protect DPC from CSR writes when entering debug mode
   logic        debug_mode;
   // CPU is in debug mode
 
@@ -1012,7 +1015,14 @@ module core #(
       `CSR_ADDR_DCSR:
         csr_rdata = debug_mode ? dcsr : 32'd0;
       `CSR_ADDR_DPC:
+      begin
         csr_rdata = debug_mode ? dpc : 32'd0;
+        if (debug_mode)
+        begin
+          $display("[CSR_READ_DPC] Time=%d HART_ID=%0d: Reading DPC, value=0x%08x debug_mode=%b", 
+                   $time, HART_ID, dpc, debug_mode);
+        end
+      end
       `CSR_ADDR_DSCRATCH0:
         csr_rdata = debug_mode ? dscratch0 : 32'd0;
       `CSR_ADDR_DSCRATCH1:
@@ -1293,6 +1303,7 @@ module core #(
       dcsr_prv     <= 2'b11;  // M-mode
       debug_mode   <= 1'b0;   // Always start in normal mode
       dpc          <= START_ADDR;  // Initialize DPC to START_ADDR for proper resumption
+      dpc_protected <= 1'b0;
       dscratch0    <= 32'd0;
       dscratch1    <= 32'd0;
 
@@ -1318,6 +1329,12 @@ module core #(
     end
     else  // Normal operation
     begin
+      // Track DPC changes for debugging - check at the END of the cycle
+      // to see what actually got written
+      
+      // Clear DPC protection flag after one cycle
+      dpc_protected <= 1'b0;
+      
       // ========================================================================
       // Register File and CSR Writes - Execute every cycle (not gated by stall)
       // This ensures instructions complete their writeback even during APB waits
@@ -1370,8 +1387,17 @@ module core #(
               end
             end
             `CSR_ADDR_DPC:
-              if (debug_mode)
+              if (debug_mode && !dpc_protected)
+              begin
+                $display("[DPC_WRITE_CSR] Time=%d HART_ID=%0d: CSR write to DPC, old=0x%08x new=0x%08x csr_cmd=%b inst=0x%08x pc=0x%08x", 
+                         $time, HART_ID, dpc, csr_wdata, csr_cmd, inst, pc);
                 dpc <= csr_wdata;
+              end
+              else if (debug_mode && dpc_protected)
+              begin
+                $display("[DPC_WRITE_BLOCKED] Time=%d HART_ID=%0d: CSR write BLOCKED (protected), keeping dpc=0x%08x (would write 0x%08x)", 
+                         $time, HART_ID, dpc, csr_wdata);
+              end
             `CSR_ADDR_DSCRATCH0:
               if (debug_mode)
                 dscratch0 <= csr_wdata;
@@ -1453,6 +1479,8 @@ module core #(
         dcsr_cause <= `DEBUG_CAUSE_HALTREQ;  // cause = 3 (treat as halt request)
         dcsr_prv   <= 2'b11;  // M-mode
         // Save PC that violated the boundary
+        $display("[DPC_WRITE_MEM_BOUNDARY] Time=%d HART_ID=%0d: Setting dpc=0x%08x (boundary violation)", 
+                 $time, HART_ID, pc);
         dpc        <= pc;
         // Jump to Debug ROM entry point
         pc         <= `DEBUG_ENTRY_POINT;
@@ -1476,6 +1504,8 @@ module core #(
         dcsr_cause <= `DEBUG_CAUSE_TRIGGER;  // cause = 2 (trigger)
         dcsr_prv   <= 2'b11;  // M-mode
         // Save PC of triggering instruction
+        $display("[DPC_WRITE_TRIGGER] Time=%d HART_ID=%0d: Setting dpc=0x%08x (trigger fire)", 
+                 $time, HART_ID, inst_pc);
         dpc        <= inst_pc;
         // Jump to Debug ROM entry point
         pc         <= `DEBUG_ENTRY_POINT;
@@ -1491,6 +1521,8 @@ module core #(
         // M-mode
         // Save PC for resumption - use pc (next instruction) not inst_pc (current)
         // When instruction_retired=1, current instruction is done, pc points to next
+        $display("[DPC_WRITE_HALTREQ] Time=%d HART_ID=%0d: Setting dpc=0x%08x (haltreq, inst_pc=0x%08x)", 
+                 $time, HART_ID, pc, inst_pc);
         dpc        <= pc;
         // Jump to Debug ROM entry point
         pc         <= `DEBUG_ENTRY_POINT;
@@ -1506,12 +1538,17 @@ module core #(
         debug_mode <= 1'b1;
         dcsr_cause <= `DEBUG_CAUSE_STEP;  // cause = 4 (single step)
         dcsr_prv   <= 2'b11;  // M-mode
-        // Save PC for resumption - pc points to next instruction after the one just executed
-        dpc        <= pc;
+        // Save PC for resumption - dpc should point to the next instruction to execute
+        // inst_pc is the PC of the instruction that just retired
+        // For most instructions, next PC is inst_pc + 4 (will be corrected for branches by hardware)
+        $display("[DPC_WRITE_STEP] Time=%d HART_ID=%0d: Setting dpc=0x%08x (single-step, inst_pc=0x%08x, OLD_dpc=0x%08x)", 
+                 $time, HART_ID, (inst_pc + 32'd4), inst_pc, dpc);
+        dpc        <= inst_pc + 32'd4;
+        dpc_protected <= 1'b1;  // Protect DPC from CSR writes this cycle
         // Jump to Debug ROM entry point
         pc         <= `DEBUG_ENTRY_POINT;
-        $display("[RVCORE_STEP] Time=%d HART_ID=%0d: Re-entering debug mode after single-step! inst_pc=0x%08x pc(next)=0x%08x dpc=0x%08x -> DEBUG_ENTRY=0x%08x dcsr_step=%b", 
-                 $time, HART_ID, inst_pc, pc, pc, `DEBUG_ENTRY_POINT, dcsr_step);
+        $display("[RVCORE_STEP] Time=%d HART_ID=%0d: Re-entering debug mode after single-step! inst_pc=0x%08x pc(current)=0x%08x dpc(saved)=0x%08x -> DEBUG_ENTRY=0x%08x dcsr_step=%b PROTECTED=1", 
+                 $time, HART_ID, inst_pc, pc, (inst_pc + 32'd4), `DEBUG_ENTRY_POINT, dcsr_step);
       end
       else if (!debug_mode && dcsr_step)
       begin
@@ -1542,10 +1579,23 @@ module core #(
         mstatus_mie  <= 1'b0;  // Disable interrupts in trap handler
         mstatus_mpp  <= 2'b11;
         // Previous privilege = M-mode
+      end  // EBREAK: Software breakpoint (execution mode) -> Enter debug mode
+      else if (`IS_EBREAK(inst) && !debug_mode && instruction_retired)
+      begin
+        // Enter debug mode due to EBREAK (software breakpoint)
+        debug_mode <= 1'b1;
+        dcsr_cause <= `DEBUG_CAUSE_EBREAK;  // cause = 1 (ebreak)
+        dcsr_prv   <= 2'b11;  // M-mode
+        // Save PC of EBREAK instruction for GDB to identify breakpoint location
+        $display("[DPC_WRITE_EBREAK] Time=%d HART_ID=%0d: Setting dpc=0x%08x (software breakpoint)",
+                 $time, HART_ID, inst_pc);
+        dpc        <= inst_pc;
+        // Jump to Debug ROM entry point
+        pc         <= `DEBUG_ENTRY_POINT;
+        $display("[RVCORE_SWBP] Time=%d HART_ID=%0d: Software breakpoint (EBREAK) at PC=0x%08x! Entering debug mode.",
+                 $time, HART_ID, inst_pc);
       end  // EBREAK: In debug mode, jump to debug exception entry (DPC + 4)
-      else if (
-        `IS_EBREAK(inst)
-        && debug_mode && instruction_retired)
+      else if (`IS_EBREAK(inst) && debug_mode && instruction_retired)
       begin  // Must be retired
         pc         <= `DEBUG_ENTRY_POINT + 32'd4;
       end
