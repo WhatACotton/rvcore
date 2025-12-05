@@ -7,3 +7,4 @@ firmware.hex
 *.dump
 rv32*
 *.log
+*.tmp
