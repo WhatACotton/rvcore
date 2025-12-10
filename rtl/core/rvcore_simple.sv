@@ -161,16 +161,10 @@ module core #(
         end
         DMEM_WRITE:
         begin
-          if (dmem_wvalid && dmem_wready)
+          if (dmem_wready)
           begin
-            if (wb_sel == `WB_MEM)
-            begin
-              next_proc_state = DMEM_READ;
-            end
-            else
-            begin
-              next_proc_state = PROC;
-            end
+            // Write completed, always go to DMEM_DONE
+            next_proc_state = DMEM_DONE;
           end
         end
         DMEM_READ:
@@ -1082,10 +1076,15 @@ module core #(
       begin
         dmem_addr <= alu_out;
 
-        // For SW, prepare data immediately
+        // For SW, prepare data and wvalid immediately
         if (`IS_SW(inst))
         begin
           dmem_wdata <= rs2_data;
+          dmem_wvalid <= 2'b11;  // Assert wvalid for SW
+        end
+        else
+        begin
+          dmem_wvalid <= 2'b00;
         end
         // For SB/SH, data will be prepared after RMW read
         // mem_inst and mem_addr_saved are saved in state transition logic
@@ -1121,15 +1120,23 @@ module core #(
               dmem_wdata <= {rs2_data[15:0], dmem_rdata[15:0]};
           endcase
         end
-      end
-
-      if (proc_state == DMEM_WRITE)
-      begin
-        // All stores now write full 32-bit word
+        // Assert wvalid after preparing RMW data
         dmem_wvalid <= 2'b11;
+      end
+      else if (proc_state == DMEM_WRITE)
+      begin
+        // Maintain wvalid during write, wait for wready
+        if (!dmem_wready)
+        begin
+          dmem_wvalid <= 2'b11;  // Keep wvalid asserted
+        end
+        else
+        begin
+          dmem_wvalid <= 2'b00;  // Deassert after write completes
+        end
 
         // Check for tohost write (RISC-V test completion)
-        if (dmem_addr == 32'h80001000 && mem_wen != 2'b00)
+        if (dmem_addr == 32'h80001000 && dmem_wready)
         begin
           exit_flag <= 1'b1;  // Test completed
         end

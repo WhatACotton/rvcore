@@ -703,28 +703,11 @@ module top_with_ram_sim #(
                $time, HART_ID, imem_addr);
     end
     
-    // Monitor RAM access
-    if (cpu_imem_rready && imem_in_ram_area) begin
-      $display("[IMEM_RAM] Time=%t HART=%0d virt=0x%08h phys=0x%08h bram_addr=0x%03h", 
-               $time, HART_ID, imem_addr, imem_phys_addr, imem_bram_addr);
-    end
     
     // Monitor debug data access
     if ((cpu_dmem_wvalid != 2'b00 || cpu_dmem_rready) && is_debug_data_access) begin
       $display("[DEBUG_DATA] Time=%t HART=%0d addr=0x%08h wr=%b rd=%b -> APB", 
                $time, HART_ID, dmem_addr, (cpu_dmem_wvalid != 2'b00), cpu_dmem_rready);
-    end
-    
-    // Monitor RAM writes
-    if (cpu_dmem_wvalid != 2'b00 && dmem_in_ram_area) begin
-      $display("[DMEM_WR_RAM] Time=%t HART=%0d virt=0x%08h phys=0x%08h data=0x%08h bram_addr=0x%03h", 
-               $time, HART_ID, dmem_addr, dmem_phys_addr, dmem_wdata, dmem_bram_addr);
-    end
-    
-    // Monitor RAM reads
-    if (cpu_dmem_rready && dmem_in_ram_area) begin
-      $display("[DMEM_RD_RAM] Time=%t HART=%0d virt=0x%08h phys=0x%08h bram_addr=0x%03h", 
-               $time, HART_ID, dmem_addr, dmem_phys_addr, dmem_bram_addr);
     end
     
     // Debug: Monitor DMEM read request conditions
@@ -733,11 +716,6 @@ module top_with_ram_sim #(
                $time, HART_ID, dmem_addr, is_debug_data_access, is_clint_access, is_uart_access);
     end
     
-    // Debug: Monitor dmem_rvalid generation
-    if (cpu_dmem_rvalid) begin
-      $display("[DMEM_RVALID] Time=%t HART=%0d rvalid=1 data=0x%08h (normal=%b debug=%b clint=%b uart=%b)", 
-               $time, HART_ID, dmem_rdata, dmem_rvalid_normal, dmem_rvalid_debug, dmem_rvalid_clint, dmem_rvalid_uart);
-    end
     
     // Monitor when address is out of range (potential bug)
     if (cpu_imem_rready && !imem_in_ram_area && !is_debug_rom_fetch) begin
