@@ -49,6 +49,7 @@ module top_with_ram_sim #(
     output logic                  i_cpu_apb_penable,
     output logic                  i_cpu_apb_pwrite,
     output logic [DATA_WIDTH-1:0] i_cpu_apb_pwdata,
+    output logic [3:0]            i_cpu_apb_pstrb,
     input  logic                  o_cpu_apb_pready,
     input  logic [DATA_WIDTH-1:0] o_cpu_apb_prdata,
     input  logic                  o_cpu_apb_pslverr,
@@ -97,7 +98,9 @@ module top_with_ram_sim #(
   logic [31:0] dmem_addr;
   logic [ 1:0] dmem_wvalid;
   logic [31:0] dmem_wdata;
+  logic [ 3:0] dmem_wbe;   // Byte enable from CPU
   logic [31:0] dmem_wstrb;
+  logic [ 3:0] dmem_pstrb; // APB byte strobe (calculated from wvalid and addr)
   logic        dmem_wready;
   logic [31:0] dmem_rdata;
   logic        dmem_rready;
@@ -179,6 +182,20 @@ module top_with_ram_sim #(
   assign is_debug_data_access = debug_mode &&
          (dmem_addr >= DEBUG_AREA_START) &&
          (dmem_addr <= DEBUG_AREA_END);
+
+  // =================================================================
+  // APB byte strobe (pstrb) calculation
+  // Now uses byte enable signal from CPU core for byte/halfword writes
+  // =================================================================
+  assign dmem_pstrb = (cpu_dmem_wvalid != 2'b00) ? dmem_wbe : 4'h0;
+  
+  // Debug logging for pstrb calculation
+  always @(posedge clk) begin
+    if (is_dm_write && dmem_apb_state == DMEM_IDLE) begin
+      $display("[DMEM_PSTRB] Time=%0t wvalid=%b wbe=0x%x pstrb=0x%x addr=0x%08x data=0x%08x",
+               $time, cpu_dmem_wvalid, dmem_wbe, dmem_pstrb, dmem_addr, dmem_wdata);
+    end
+  end
 
   assign is_dm_read = debug_mode && cpu_dmem_rready && is_debug_data_access;
 
@@ -306,11 +323,63 @@ module top_with_ram_sim #(
   assign i_cpu_apb_penable      = arbiter_out_if.penable;
   assign i_cpu_apb_pwrite       = arbiter_out_if.pwrite;
   assign i_cpu_apb_pwdata       = arbiter_out_if.pwdata;
+  assign i_cpu_apb_pstrb        = arbiter_out_if.pstrb;
+
+  // Decode APB arbiter address to determine target
+  logic arbiter_is_ram, arbiter_is_clint, arbiter_is_uart, arbiter_is_dm;
+  logic [31:0] arbiter_addr;
+  assign arbiter_addr = arbiter_out_if.paddr;
+  
+  assign arbiter_is_ram = ((arbiter_addr >= RAM_BASE_ADDR) && (arbiter_addr <= RAM_END_ADDR)) ||
+                          (arbiter_addr[31:14] == 18'h3FFFF);
+  assign arbiter_is_clint = (arbiter_addr >= CLINT_BASE) && (arbiter_addr <= CLINT_END);
+  assign arbiter_is_uart = (arbiter_addr >= UART_BASE_ADDR) && (arbiter_addr <= UART_BASE_ADDR + 32'h0000000F);
+  assign arbiter_is_dm = ~arbiter_is_ram && ~arbiter_is_clint && ~arbiter_is_uart;
+
+  // Route read data from appropriate source
+  logic [31:0] arbiter_prdata_mux;
+  logic        arbiter_pready_mux;
+  
+  // Register to track arbiter RAM access
+  logic arbiter_ram_access_pending;
+  
+  always_ff @(posedge clk or negedge reset_n) begin
+    if (!reset_n) begin
+      arbiter_ram_access_pending <= 1'b0;
+    end else begin
+      // Set when arbiter requests RAM, clear when BRAM responds
+      if (arbiter_ram_read && !arbiter_ram_access_pending) begin
+        arbiter_ram_access_pending <= 1'b1;
+      end else if (bram_dmem_valid && arbiter_ram_access_pending) begin
+        arbiter_ram_access_pending <= 1'b0;
+      end
+    end
+  end
+  
+  always_comb begin
+    if (arbiter_is_clint) begin
+      arbiter_prdata_mux = clint_prdata;
+      arbiter_pready_mux = clint_pready;
+    end else if (arbiter_is_uart) begin
+      arbiter_prdata_mux = uart_prdata;
+      arbiter_pready_mux = uart_pready;
+    end else if (arbiter_is_ram) begin
+      // RAM access via arbiter - use BRAM valid signal
+      arbiter_prdata_mux = dmem_bram_dout;
+      // For writes, ready immediately. For reads, wait for bram_dmem_valid
+      arbiter_pready_mux = arbiter_ram_write ? 1'b1 : 
+                           (arbiter_ram_access_pending ? bram_dmem_valid : 1'b0);
+    end else begin
+      // Debug Module or other
+      arbiter_prdata_mux = o_cpu_apb_prdata;
+      arbiter_pready_mux = o_cpu_apb_pready;
+    end
+  end
 
   // Connect external APB response back to arbiter
-  assign arbiter_out_if.pready  = o_cpu_apb_pready;
-  assign arbiter_out_if.prdata  = o_cpu_apb_prdata;
-  assign arbiter_out_if.pslverr = o_cpu_apb_pslverr;
+  assign arbiter_out_if.pready  = arbiter_pready_mux;
+  assign arbiter_out_if.prdata  = arbiter_prdata_mux;
+  assign arbiter_out_if.pslverr = arbiter_is_dm ? o_cpu_apb_pslverr : 1'b0;
 
   // =================================================================
   //  IMEM APB Master Logic (Debug ROM Access)
@@ -511,6 +580,7 @@ module top_with_ram_sim #(
             dmem_apb_if.paddr  <= dmem_addr[ADDR_WIDTH-1:0];
             dmem_apb_if.pwrite <= is_dm_write;
             dmem_apb_if.pwdata <= dmem_wdata;
+            dmem_apb_if.pstrb  <= dmem_pstrb;
           end
         end
         DMEM_SETUP:
@@ -518,6 +588,7 @@ module top_with_ram_sim #(
           dmem_apb_if.paddr   <= dmem_transaction_addr;
           dmem_apb_if.pwrite  <= dmem_transaction_write;
           dmem_apb_if.pwdata  <= dmem_transaction_wdata;
+          dmem_apb_if.pstrb   <= dmem_pstrb;
           dmem_apb_if.psel    <= 1'b1;
           dmem_apb_if.penable <= 1'b1;
         end
@@ -526,6 +597,7 @@ module top_with_ram_sim #(
           dmem_apb_if.paddr   <= dmem_transaction_addr;
           dmem_apb_if.pwrite  <= dmem_transaction_write;
           dmem_apb_if.pwdata  <= dmem_transaction_wdata;
+          dmem_apb_if.pstrb   <= dmem_pstrb;
           dmem_apb_if.psel    <= 1'b1;
           dmem_apb_if.penable <= 1'b1;
           if (dmem_apb_if.pready || dmem_apb_if.pslverr)
@@ -647,19 +719,80 @@ module top_with_ram_sim #(
   assign imem_bram_addr = imem_phys_addr[13:2];
   assign dmem_bram_addr = dmem_phys_addr[13:2];
   
+  // APB arbiter RAM access signals
+  logic arbiter_ram_write;
+  logic arbiter_ram_read;
+  logic [11:0] arbiter_bram_addr;
+  logic [31:0] arbiter_phys_addr;
+  
+  assign arbiter_phys_addr = (arbiter_addr[31:14] == 18'h3FFFF) ? {18'h0, arbiter_addr[13:0]} : 
+                             (arbiter_addr - RAM_BASE_ADDR);
+  assign arbiter_bram_addr = arbiter_phys_addr[13:2];
+  assign arbiter_ram_write = arbiter_is_ram && arbiter_out_if.psel && arbiter_out_if.penable && arbiter_out_if.pwrite;
+  assign arbiter_ram_read  = arbiter_is_ram && arbiter_out_if.psel && !arbiter_out_if.pwrite;
+  
+  // Debug logging for arbiter RAM access
+  always @(posedge clk) begin
+    if (arbiter_ram_write) begin
+      $display("[ARBITER_RAM_WR] Time=%0t addr=0x%08x data=0x%08x strb=0x%x", 
+               $time, arbiter_addr, arbiter_out_if.pwdata, arbiter_out_if.pstrb);
+    end
+    if (arbiter_ram_read) begin
+      $display("[ARBITER_RAM_RD] Time=%0t addr=0x%08x psel=%b penable=%b", 
+               $time, arbiter_addr, arbiter_out_if.psel, arbiter_out_if.penable);
+    end
+    if (arbiter_ram_access_pending && bram_dmem_valid) begin
+      $display("[ARBITER_RAM_RD_DATA] Time=%0t data=0x%08x", $time, dmem_bram_dout);
+    end
+  end
+  
   // Write enable logic
   // DMEM write is enabled when:
-  // 1. CPU issues a valid write (cpu_dmem_wvalid != 2'b00)
-  // 2. Target is RAM area (dmem_in_ram_area)
+  // 1. CPU issues a valid write (cpu_dmem_wvalid != 2'b00) OR arbiter writes
+  // 2. Target is RAM area (dmem_in_ram_area or arbiter_is_ram)
   // 3. Not accessing debug module registers (is_debug_data_access)
   // 4. Not accessing peripherals (CLINT, UART)
   // Note: We allow writes in debug mode to normal memory (for progbuf execution)
-  assign dmem_bram_we = (cpu_dmem_wvalid != 2'b00) && dmem_in_ram_area && 
+  logic cpu_bram_we, arbiter_bram_we;
+  assign cpu_bram_we = (cpu_dmem_wvalid != 2'b00) && dmem_in_ram_area && 
                         !is_debug_data_access && !is_clint_access && !is_uart_access;
+  assign arbiter_bram_we = arbiter_ram_write;
+  assign dmem_bram_we = cpu_bram_we || arbiter_bram_we;
+  
+  always @(posedge clk) begin
+    if ((cpu_dmem_wvalid != 2'b00)) begin
+      $display("[RVCORE_DMEM_WR] Time=%0t HART=%0d wvalid=%b addr=0x%08x data=0x%08x in_ram=%b debug_data=%b we=%b", 
+               $time, HART_ID, cpu_dmem_wvalid, dmem_addr, dmem_wdata,
+               dmem_in_ram_area, is_debug_data_access, dmem_bram_we);
+    end
+  end
 
   // Single-port BRAM with arbiter - outputs valid signals
   logic bram_imem_valid;
   logic bram_dmem_valid;
+  
+  // Multiplex DMEM and arbiter accesses
+  logic [11:0]  bram_dmem_addr_mux;
+  logic [31:0]  bram_dmem_wdata_mux;
+  logic [3:0]   bram_dmem_wstrb_mux;
+  logic         bram_dmem_rden_mux;
+  
+  always_comb begin
+    if (arbiter_ram_write || arbiter_ram_read) begin
+      // Arbiter has priority
+      bram_dmem_addr_mux  = arbiter_bram_addr;
+      bram_dmem_wdata_mux = arbiter_out_if.pwdata;
+      bram_dmem_wstrb_mux = arbiter_out_if.pstrb;
+      bram_dmem_rden_mux  = arbiter_ram_read;
+    end else begin
+      // CPU access
+      bram_dmem_addr_mux  = dmem_bram_addr;
+      bram_dmem_wdata_mux = dmem_wdata;
+      bram_dmem_wstrb_mux = dmem_wbe;
+      bram_dmem_rden_mux  = cpu_dmem_rready && dmem_in_ram_area && 
+                           !is_debug_data_access && !is_clint_access && !is_uart_access;
+    end
+  end
   
   unified_gowin_bram #(
     .DEPTH     (IMEM_DEPTH), 
@@ -675,11 +808,12 @@ module top_with_ram_sim #(
     .imem_rd_data    (imem_bram_dout),
     .imem_rd_valid   (bram_imem_valid),  // NEW: indicates when IMEM data is valid
     
-    // Port B: DMEM (Read/Write)
+    // Port B: DMEM (Read/Write) - multiplexed with arbiter
     .dmem_wr_en        (dmem_bram_we),
-    .dmem_rd_en        (cpu_dmem_rready && dmem_in_ram_area && !is_debug_data_access && !is_clint_access && !is_uart_access),
-    .dmem_addr         (dmem_bram_addr),
-    .dmem_wr_data      (dmem_wdata),
+    .dmem_rd_en        (bram_dmem_rden_mux),
+    .dmem_addr         (bram_dmem_addr_mux),
+    .dmem_wr_data      (bram_dmem_wdata_mux),
+    .dmem_wr_strb      (bram_dmem_wstrb_mux),  // Byte enable from CPU or arbiter
     .dmem_rd_data      (dmem_bram_dout),
     .dmem_access_valid (bram_dmem_valid)  // NEW: indicates when DMEM data/write is valid
   );
@@ -757,6 +891,7 @@ module top_with_ram_sim #(
          .dmem_wready(cpu_dmem_wready),
          .dmem_wvalid(cpu_dmem_wvalid),
          .dmem_wdata (dmem_wdata),
+         .dmem_wbe   (dmem_wbe),
          .dmem_addr  (dmem_addr),
 
          // DMEM Read Interface
@@ -820,6 +955,7 @@ module unified_gowin_bram #(
     input  logic                     dmem_rd_en,
     input  logic [ADDR_WIDTH-1:0]    dmem_addr,
     input  logic [31:0]              dmem_wr_data,
+    input  logic [3:0]               dmem_wr_strb,  // Byte write enable
     output logic [31:0]              dmem_rd_data,
     output logic                     dmem_access_valid  // NEW: indicates data/write is valid
   );
@@ -849,6 +985,7 @@ module unified_gowin_bram #(
   logic                  bram_rd_en;
   logic [ADDR_WIDTH-1:0] bram_addr;
   logic [31:0]           bram_wr_data;
+  logic [3:0]            bram_wr_strb;  // Byte write enable
   arb_state_t            current_grant;
   
   always_comb begin
@@ -856,6 +993,7 @@ module unified_gowin_bram #(
     bram_rd_en = 1'b0;
     bram_addr = '0;
     bram_wr_data = '0;
+    bram_wr_strb = 4'b0000;
     current_grant = ARB_IDLE;
     
     // DMEM write has highest priority
@@ -863,6 +1001,7 @@ module unified_gowin_bram #(
       current_grant = ARB_DMEM_WR;
       bram_addr = dmem_addr;
       bram_wr_data = dmem_wr_data;
+      bram_wr_strb = dmem_wr_strb;
       bram_wr_en = 1'b1;
       // Write-first: also read if dmem_rd_en is asserted
       bram_rd_en = dmem_rd_en && !dmem_rd_in_progress;  // Only start new read if not in progress
@@ -881,15 +1020,25 @@ module unified_gowin_bram #(
     end
   end
 
-  // BRAM access
+  // BRAM access with byte enable support
   always_ff @(posedge clk) begin
     if (bram_wr_en) begin
-      mem[bram_addr] <= bram_wr_data;
+      // Byte-wise write based on strobe
+      if (bram_wr_strb[0]) mem[bram_addr][ 7: 0] <= bram_wr_data[ 7: 0];
+      if (bram_wr_strb[1]) mem[bram_addr][15: 8] <= bram_wr_data[15: 8];
+      if (bram_wr_strb[2]) mem[bram_addr][23:16] <= bram_wr_data[23:16];
+      if (bram_wr_strb[3]) mem[bram_addr][31:24] <= bram_wr_data[31:24];
+`ifndef SYNTHESIS
+      $display("[BRAM_WRITE] Time=%0t addr=0x%03x data=0x%08x strb=0x%x", $time, bram_addr, bram_wr_data, bram_wr_strb);
+`endif
       // Write-first behavior
       if (bram_rd_en)
-        rd_data_reg <= bram_wr_data;
+        rd_data_reg <= mem[bram_addr];  // Read the updated value
     end else if (bram_rd_en) begin
       rd_data_reg <= mem[bram_addr];
+`ifndef SYNTHESIS
+      $display("[BRAM_READ] Time=%0t addr=0x%03x data=0x%08x", $time, bram_addr, rd_data_reg);
+`endif
     end
   end
   

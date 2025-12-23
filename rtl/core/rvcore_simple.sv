@@ -13,6 +13,7 @@ module core #(
     input  logic        dmem_rvalid,
     output logic        dmem_rready,
     output logic [31:0] dmem_wdata,
+    output logic [ 3:0] dmem_wbe,
     input        [31:0] dmem_rdata,
     output logic [31:0] dmem_addr,
     output logic        imem_rready,
@@ -139,16 +140,8 @@ module core #(
         begin
           if (mem_wen != `MEN_X)
           begin
-            // For SB/SH, need Read-Modify-Write: Read first
-            if (`IS_SB(inst) || `IS_SH(inst))
-            begin
-              next_proc_state = DMEM_READ;
-            end
-            else
-            begin
-              // SW: Direct write
-              next_proc_state = DMEM_WRITE;
-            end
+            // All store instructions (SW/SH/SB) go directly to write with byte enable
+            next_proc_state = DMEM_WRITE;
           end
           else if (mem_wen == `MEN_X && wb_sel == `WB_MEM)
           begin
@@ -171,15 +164,8 @@ module core #(
         begin
           if (dmem_rvalid && dmem_rready)
           begin
-            // After RMW read for SB/SH, go to write
-            if (mem_wen != `MEN_X && (`IS_SB(mem_inst) || `IS_SH(mem_inst)))
-            begin
-              next_proc_state = DMEM_WRITE;
-            end
-            else
-            begin
-              next_proc_state = DMEM_DONE;
-            end
+            // Read completed, go to DMEM_DONE (no RMW needed with byte enable)
+            next_proc_state = DMEM_DONE;
           end
         end
         // Duplicate DMEM_READ case removed (handled above)
@@ -1068,6 +1054,7 @@ module core #(
       dmem_addr   <= 32'd0;
       dmem_wdata  <= 32'd0;
       dmem_wvalid <= 2'b00;
+      dmem_wbe    <= 4'b0000;
       exit_flag         <= 1'b0;
     end
     else
@@ -1081,59 +1068,43 @@ module core #(
         begin
           dmem_wdata <= rs2_data;
           dmem_wvalid <= 2'b11;  // Assert wvalid for SW
+          dmem_wbe <= 4'b1111;   // All bytes enabled
+        end
+        // For SB, prepare byte data and byte enable
+        // Replicate byte data to all positions, byte enable selects which one is written
+        else if (`IS_SB(inst))
+        begin
+          dmem_wvalid <= 2'b11;
+          dmem_wdata <= {rs2_data[7:0], rs2_data[7:0], rs2_data[7:0], rs2_data[7:0]};
+          case (alu_out[1:0])
+            2'b00: dmem_wbe <= 4'b0001;
+            2'b01: dmem_wbe <= 4'b0010;
+            2'b10: dmem_wbe <= 4'b0100;
+            2'b11: dmem_wbe <= 4'b1000;
+          endcase
+        end
+        // For SH, prepare halfword data and byte enable
+        // Replicate halfword data to both positions, byte enable selects which one is written
+        else if (`IS_SH(inst))
+        begin
+          dmem_wvalid <= 2'b11;
+          dmem_wdata <= {rs2_data[15:0], rs2_data[15:0]};
+          case (alu_out[1])
+            1'b0: dmem_wbe <= 4'b0011;
+            1'b1: dmem_wbe <= 4'b1100;
+          endcase
         end
         else
         begin
           dmem_wvalid <= 2'b00;
+          dmem_wbe <= 4'b0000;
         end
-        // For SB/SH, data will be prepared after RMW read
-        // mem_inst and mem_addr_saved are saved in state transition logic
-      end
-      else if (proc_state == DMEM_READ && dmem_rvalid && (mem_wen != `MEN_X) && (
-                 `IS_SB(mem_inst)
-                 ||
-                 `IS_SH(mem_inst)
-               ))
-      begin
-        // Read-Modify-Write: Merge new data with read data
-        if (`IS_SB(mem_inst))
-        begin
-          // Store Byte: Replace one byte
-          case (mem_addr_saved[1:0])
-            2'b00:
-              dmem_wdata <= {dmem_rdata[31:8], rs2_data[7:0]};
-            2'b01:
-              dmem_wdata <= {dmem_rdata[31:16], rs2_data[7:0], dmem_rdata[7:0]};
-            2'b10:
-              dmem_wdata <= {dmem_rdata[31:24], rs2_data[7:0], dmem_rdata[15:0]};
-            2'b11:
-              dmem_wdata <= {rs2_data[7:0], dmem_rdata[23:0]};
-          endcase
-        end
-        else if (`IS_SH(mem_inst))
-        begin
-          // Store Halfword: Replace halfword
-          case (mem_addr_saved[1])
-            1'b0:
-              dmem_wdata <= {dmem_rdata[31:16], rs2_data[15:0]};
-            1'b1:
-              dmem_wdata <= {rs2_data[15:0], dmem_rdata[15:0]};
-          endcase
-        end
-        // Assert wvalid after preparing RMW data
-        dmem_wvalid <= 2'b11;
       end
       else if (proc_state == DMEM_WRITE)
       begin
-        // Maintain wvalid during write, wait for wready
-        if (!dmem_wready)
-        begin
-          dmem_wvalid <= 2'b11;  // Keep wvalid asserted
-        end
-        else
-        begin
-          dmem_wvalid <= 2'b00;  // Deassert after write completes
-        end
+        // Maintain wvalid, wbe, and wdata during write, wait for wready
+        dmem_wvalid <= 2'b11;  // Keep wvalid asserted until write completes
+        // dmem_wbe and dmem_wdata are set in IMEM_DONE, keep them here
 
         // Check for tohost write (RISC-V test completion)
         if (dmem_addr == 32'h80001000 && dmem_wready)
@@ -1144,6 +1115,7 @@ module core #(
       else
       begin
         dmem_wvalid <= 2'b00;
+        dmem_wbe <= 4'b0000;
       end
     end
   end
